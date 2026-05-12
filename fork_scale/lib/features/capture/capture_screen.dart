@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -122,13 +123,15 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     } on GeminiApiException catch (e) {
       if (e.statusCode == 401 || e.statusCode == 403) {
         _showApiKeyError();
+      } else if (e.statusCode == 503) {
+        _showError('Gemini is overloaded — try again in a moment.', detail: e.body);
       } else {
-        _showError('API error (${e.statusCode}). Please try again.');
+        _showError('API error (${e.statusCode}).', detail: e.body);
       }
-    } on GeminiParseException {
-      _showError('Could not read results — please retake the photo.');
+    } on GeminiParseException catch (e) {
+      _showError('Could not read results — please retake the photo.', detail: e.rawText);
     } catch (e) {
-      _showError('An unexpected error occurred: $e');
+      _showError('An unexpected error occurred.', detail: e.toString());
     } finally {
       if (mounted) setState(() => _isAnalysing = false);
     }
@@ -146,9 +149,48 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     );
   }
 
-  void _showError(String message) {
+  void _showError(String message, {String? detail}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        action: detail != null
+            ? SnackBarAction(
+                label: 'Details',
+                onPressed: () => _showErrorDetail(message, detail),
+              )
+            : null,
+      ),
+    );
+  }
+
+  void _showErrorDetail(String message, String detail) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Error detail'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            detail,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: '$message\n\n$detail'));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Copied to clipboard')),
+              );
+            },
+            child: const Text('Copy'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 

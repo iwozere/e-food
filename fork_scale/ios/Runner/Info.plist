@@ -41,6 +41,12 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- url_launcher: allow querying whether https URLs can be opened -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>https</string>
+	</array>
+
 	<!-- Camera and photo library usage descriptions (required by App Store review) -->
 	<key>NSCameraUsageDescription</key>
 	<string>ForkScale uses your camera to photograph your meal. A fork or knife beside the plate helps estimate portion sizes.</string>

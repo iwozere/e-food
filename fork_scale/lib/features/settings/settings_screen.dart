@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../core/services/gemini_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
@@ -238,6 +240,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  _ApiKeyHint(),
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerRight,
@@ -297,6 +301,50 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 32),
         ],
       ),
+    );
+  }
+}
+
+class _ApiKeyHint extends StatelessWidget {
+  static final _url = Uri.parse('https://aistudio.google.com/app/apikey');
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.info_outline, size: 14, color: AppColors.subtle),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              style: const TextStyle(fontSize: 12, color: AppColors.subtle),
+              children: [
+                const TextSpan(
+                  text: 'Free — no credit card needed. Sign in with a Google account at ',
+                ),
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.baseline,
+                  baseline: TextBaseline.alphabetic,
+                  child: GestureDetector(
+                    onTap: () => launchUrl(_url, mode: LaunchMode.externalApplication),
+                    child: const Text(
+                      'Google AI Studio',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.primary,
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppColors.primary,
+                      ),
+                    ),
+                  ),
+                ),
+                const TextSpan(text: ', then tap Get API key → Create API key.'),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

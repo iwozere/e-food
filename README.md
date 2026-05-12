@@ -97,7 +97,11 @@ e-food/
 ### Prerequisites
 
 - Flutter 3.x (`flutter doctor` should report no issues for Android/iOS)
-- A [Gemini API key](https://aistudio.google.com/app/apikey) (free tier: 250 requests/day)
+- A **Gemini API key** — free, no credit card required:
+  1. Sign in at [aistudio.google.com](https://aistudio.google.com) with any Google account.
+  2. Click **Get API key → Create API key**.
+  3. Copy the key (starts with `AIza…`) and paste it into the app's **Settings** screen.
+  > Free tier limits: 10 requests/minute, 250 requests/day — sufficient for personal use.
 - Android: SDK platform 35+, NDK 28.x (installed via SDK Manager)
 - iOS: Xcode 15+, CocoaPods
 
