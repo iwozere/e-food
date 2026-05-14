@@ -33,6 +33,25 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     setState(() => _saving = true);
     try {
       final repo = ref.read(mealsRepositoryProvider);
+      final pendingId = widget.result.pendingMealId;
+
+      if (pendingId != null) {
+        final existing = await repo.getMeal(pendingId);
+        if (existing != null) {
+          await repo.updateMeal(existing.copyWith(
+            totalKcal: state.totalKcal,
+            items: state.items,
+            scaleConf: state.scaleConfidence,
+            mealType: state.mealType,
+            notes: state.notes,
+            pending: false,
+          ));
+          if (!mounted) return;
+          context.go('/history/$pendingId');
+          return;
+        }
+      }
+
       final meal = Meal(
         createdAt: DateTime.now(),
         photoPath: state.photoPath,
@@ -42,6 +61,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         scaleConf: state.scaleConfidence,
         modelUsed: 'gemini',
         items: state.items,
+        mealType: state.mealType,
       );
       final id = await repo.insertMeal(meal);
       if (!mounted) return;
@@ -118,6 +138,12 @@ class _ResultsBody extends ConsumerWidget {
             ),
           ),
           SliverToBoxAdapter(
+            child: _MealTypeRow(
+              selected: state.mealType,
+              onChanged: notifier.updateMealType,
+            ),
+          ),
+          SliverToBoxAdapter(
             child: _NotesField(
               initial: state.notes ?? '',
               onChanged: notifier.updateNotes,
@@ -129,6 +155,59 @@ class _ResultsBody extends ConsumerWidget {
       bottomNavigationBar: _SaveBar(
         saving: saving,
         onSave: () => onSave(state),
+      ),
+    );
+  }
+}
+
+class _MealTypeRow extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onChanged;
+
+  const _MealTypeRow({required this.selected, required this.onChanged});
+
+  static const _types = ['breakfast', 'lunch', 'snack', 'dinner'];
+  static const _labels = {
+    'breakfast': 'Breakfast',
+    'lunch': 'Lunch',
+    'snack': 'Snack',
+    'dinner': 'Dinner',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'MEAL TYPE',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.subtle,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: _types.map((type) {
+              final isSelected = type == selected;
+              return ChoiceChip(
+                label: Text(_labels[type]!),
+                selected: isSelected,
+                onSelected: (_) => onChanged(type),
+                selectedColor: AppColors.primary,
+                labelStyle: TextStyle(
+                  color: isSelected ? Colors.white : null,
+                  fontWeight: isSelected ? FontWeight.w600 : null,
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -280,7 +359,7 @@ class _NotesFieldState extends State<_NotesField> {
         onChanged: widget.onChanged,
         decoration: const InputDecoration(
           labelText: 'Notes (optional)',
-          hintText: 'e.g. lunch, post-run',
+          hintText: 'e.g. post-run, cheat day',
         ),
         maxLines: 2,
       ),

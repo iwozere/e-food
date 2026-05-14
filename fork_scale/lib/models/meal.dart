@@ -7,9 +7,12 @@ class Meal {
   final String? name;
   final String? notes;
   final double totalKcal;
-  final String utensil; // 'fork' | 'knife'
+  final String utensil; // 'fork' | 'knife' | 'spoon'
   final String? scaleConf; // 'high' | 'medium' | 'low' | null
   final String modelUsed; // 'gemini'
+  final String? mealType; // 'breakfast' | 'lunch' | 'dinner' | 'snack'
+  final bool pending;
+  final bool starred;
   final List<MealItem> items;
 
   const Meal({
@@ -22,8 +25,20 @@ class Meal {
     required this.utensil,
     this.scaleConf,
     required this.modelUsed,
+    this.mealType,
+    this.pending = false,
+    this.starred = false,
     this.items = const [],
   });
+
+  /// Auto-detects meal type from the hour of [at] (defaults to now).
+  static String detectTypeFromTime([DateTime? at]) {
+    final hour = (at ?? DateTime.now()).hour;
+    if (hour >= 5 && hour < 10) return 'breakfast';
+    if (hour >= 10 && hour < 15) return 'lunch';
+    if (hour >= 15 && hour < 18) return 'snack';
+    return 'dinner';
+  }
 
   Meal copyWith({
     int? id,
@@ -35,6 +50,9 @@ class Meal {
     String? utensil,
     String? scaleConf,
     String? modelUsed,
+    String? mealType,
+    bool? pending,
+    bool? starred,
     List<MealItem>? items,
   }) {
     return Meal(
@@ -47,6 +65,9 @@ class Meal {
       utensil: utensil ?? this.utensil,
       scaleConf: scaleConf ?? this.scaleConf,
       modelUsed: modelUsed ?? this.modelUsed,
+      mealType: mealType ?? this.mealType,
+      pending: pending ?? this.pending,
+      starred: starred ?? this.starred,
       items: items ?? this.items,
     );
   }
@@ -61,6 +82,9 @@ class Meal {
         'utensil': utensil,
         'scale_conf': scaleConf,
         'model_used': modelUsed,
+        'meal_type': mealType,
+        'pending': pending ? 1 : 0,
+        'starred': starred ? 1 : 0,
       };
 
   factory Meal.fromMap(Map<String, dynamic> map, {List<MealItem> items = const []}) => Meal(
@@ -73,6 +97,9 @@ class Meal {
         utensil: map['utensil'] as String,
         scaleConf: map['scale_conf'] as String?,
         modelUsed: map['model_used'] as String,
+        mealType: map['meal_type'] as String?,
+        pending: (map['pending'] as int? ?? 0) != 0,
+        starred: (map['starred'] as int? ?? 0) != 0,
         items: items,
       );
 }

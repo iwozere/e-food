@@ -23,8 +23,9 @@ class AppDatabase {
     final path = p.join(dir.path, 'fork_scale.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 3,
       onCreate: _createMealsSchema,
+      onUpgrade: _upgradeMealsSchema,
     );
   }
 
@@ -39,7 +40,10 @@ class AppDatabase {
         total_kcal  REAL NOT NULL,
         utensil     TEXT NOT NULL DEFAULT 'fork',
         scale_conf  TEXT,
-        model_used  TEXT NOT NULL
+        model_used  TEXT NOT NULL,
+        meal_type   TEXT,
+        pending     INTEGER NOT NULL DEFAULT 0,
+        starred     INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.execute('''
@@ -57,6 +61,19 @@ class AppDatabase {
     await db.execute(
       "CREATE VIRTUAL TABLE meals_fts USING fts4(name, notes)",
     );
+  }
+
+  static Future<void> _upgradeMealsSchema(
+      Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute("ALTER TABLE meals ADD COLUMN meal_type TEXT");
+      await db.execute(
+          "ALTER TABLE meals ADD COLUMN pending INTEGER NOT NULL DEFAULT 0");
+    }
+    if (oldVersion < 3) {
+      await db.execute(
+          "ALTER TABLE meals ADD COLUMN starred INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   static Future<Database> _openUsdaDb() async {

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:flutter/services.dart';
@@ -142,6 +143,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   String _mb(int bytes) => '${(bytes / 1048576).toStringAsFixed(1)} MB';
+
+  Future<void> _exportCsv() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await ref.read(mealsRepositoryProvider).exportCsv();
+      await Share.shareXFiles(
+        [XFile(path)],
+        subject: 'ForkScale meal history',
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Export failed: $e')),
+      );
+    }
+  }
 
   Future<void> _clearHistory() async {
     final messenger = ScaffoldMessenger.of(context);
@@ -329,6 +345,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _exportCsv,
+                    icon: const Icon(Icons.ios_share),
+                    label: const Text('Export to CSV'),
+                  ),
+                  const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: _clearHistory,
                     icon: const Icon(Icons.delete_forever, color: AppColors.error),

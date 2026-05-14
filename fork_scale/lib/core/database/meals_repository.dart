@@ -1,3 +1,8 @@
+import 'dart:io';
+
+import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
 import 'app_database.dart';
@@ -10,7 +15,6 @@ class MealsRepository {
       final item = meal.items[i].copyWith(mealId: mealId, sortOrder: i);
       await db.insert('meal_items', item.toMap());
     }
-    // Update FTS index
     await db.execute(
       "INSERT INTO meals_fts(rowid, name, notes) VALUES (?, ?, ?)",
       [mealId, meal.name, meal.notes],
@@ -38,6 +42,16 @@ class MealsRepository {
     await db.execute("DELETE FROM meals_fts WHERE rowid = ?", [id]);
   }
 
+  Future<void> starMeal(int id, {required bool starred}) async {
+    final db = await AppDatabase.mealsDb;
+    await db.update(
+      'meals',
+      {'starred': starred ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<Meal?> getMeal(int id) async {
     final db = await AppDatabase.mealsDb;
     final rows = await db.query('meals', where: 'id = ?', whereArgs: [id]);
@@ -52,6 +66,7 @@ class MealsRepository {
     String? searchQuery,
     double? minKcal,
     double? maxKcal,
+    bool starredOnly = false,
     int limit = 50,
     int offset = 0,
   }) async {
@@ -79,6 +94,9 @@ class MealsRepository {
       where.add('total_kcal <= ?');
       args.add(maxKcal);
     }
+    if (starredOnly) {
+      where.add('starred = 1');
+    }
 
     final rows = await db.query(
       'meals',
@@ -98,7 +116,8 @@ class MealsRepository {
     return meals;
   }
 
-  Future<List<Meal>> _searchMeals(String query, {int limit = 50, int offset = 0}) async {
+  Future<List<Meal>> _searchMeals(String query,
+      {int limit = 50, int offset = 0}) async {
     final db = await AppDatabase.mealsDb;
     final ftsRows = await db.rawQuery(
       "SELECT rowid FROM meals_fts WHERE meals_fts MATCH ? LIMIT ? OFFSET ?",
@@ -116,13 +135,69 @@ class MealsRepository {
 
   Future<double> getDayTotalKcal(DateTime day) async {
     final db = await AppDatabase.mealsDb;
-    final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
-    final end = DateTime(day.year, day.month, day.day, 23, 59, 59).millisecondsSinceEpoch;
+    final start =
+        DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
+    final end =
+        DateTime(day.year, day.month, day.day, 23, 59, 59).millisecondsSinceEpoch;
     final result = await db.rawQuery(
-      'SELECT SUM(total_kcal) as total FROM meals WHERE created_at BETWEEN ? AND ?',
+      'SELECT SUM(total_kcal) as total FROM meals '
+      'WHERE created_at BETWEEN ? AND ? AND pending = 0',
       [start, end],
     );
     return (result.first['total'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  /// Returns kcal totals for the last 7 days, index 0 = 6 days ago, index 6 = today.
+  Future<List<double>> getWeeklyKcal() async {
+    final today = DateTime.now();
+    final results = <double>[];
+    for (var i = 6; i >= 0; i--) {
+      final day = DateTime(today.year, today.month, today.day)
+          .subtract(Duration(days: i));
+      results.add(await getDayTotalKcal(day));
+    }
+    return results;
+  }
+
+  /// Exports all analyzed meals to a CSV file in the temp directory.
+  /// Returns the file path for sharing.
+  Future<String> exportCsv() async {
+    final db = await AppDatabase.mealsDb;
+    final rows = await db.query(
+      'meals',
+      where: 'pending = 0',
+      orderBy: 'created_at ASC',
+    );
+
+    final dateFmt = DateFormat('yyyy-MM-dd');
+    final timeFmt = DateFormat('HH:mm');
+    final buf = StringBuffer();
+    buf.writeln('Date,Time,Meal Type,Total kcal,Utensil,Starred,Items');
+
+    for (final row in rows) {
+      final meal = Meal.fromMap(row);
+      final items = await _getItems(meal.id!);
+      final itemsStr = items
+          .map((i) =>
+              '${i.name}: ${i.weightG.round()}g ${i.totalKcal.round()}kcal')
+          .join('; ');
+      final escapedItems = itemsStr.replaceAll('"', '""');
+      buf.writeln(
+        '${dateFmt.format(meal.createdAt)},'
+        '${timeFmt.format(meal.createdAt)},'
+        '${meal.mealType ?? ''},'
+        '${meal.totalKcal.round()},'
+        '${meal.utensil},'
+        '${meal.starred ? '1' : '0'},'
+        '"$escapedItems"',
+      );
+    }
+
+    final dir = await getTemporaryDirectory();
+    final stamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+    final file = File('${dir.path}/forkscale_$stamp.csv');
+    await file.writeAsString(buf.toString());
+    return file.path;
   }
 
   Future<List<MealItem>> _getItems(int mealId) async {

@@ -45,70 +45,84 @@ Users need to fix values before saving without retaking the photo.
 
 ---
 
-### CR-01-C — Meal type tag (not yet implemented)
+### CR-01-C — Meal type tag ✅ implemented (CR-02-A)
 
-Add a breakfast / lunch / dinner / snack tag to each meal on the results screen before
-saving. Store as a new `meal_type` column in the `meals` table. Display in history list
-and detail screen. Useful for spotting calorie patterns by meal.
-
-**Effort:** small (~1 h) — requires a DB migration (add column + default value for
-existing rows).
+Auto-detected from time of day (breakfast / lunch / snack / dinner). ChoiceChip row
+on the results screen lets the user override before saving. Shown in history tile
+subtitle and meal detail chips. See change-request-02.md for full spec.
 
 ---
 
-### CR-01-D — Daily progress bar (not yet implemented)
+### CR-01-D — Daily progress bar ✅ implemented
 
-Show today's total kcal vs the configured daily goal on the capture screen or at the
-top of the history screen. Already have `daily_goal` in SharedPreferences and DB access.
-Needs a single `FutureProvider` that sums today's meals.
-
-**Effort:** small (~1 h)
+Today's total kcal vs the configured daily goal shown at the top of the history screen
+as a `_DaySummaryBar`: colored progress bar + `total / goal kcal` text, using the
+`getDayTotalKcal` repository method and the `daily_goal` SharedPreferences key.
 
 ---
 
-### CR-01-E — Weekly calorie bar chart (not yet implemented)
+### CR-01-E — Weekly calorie bar chart ✅ implemented
 
-A 7-day bar chart in the history screen using `fl_chart` (common Flutter package).
-Tap a bar to jump to that day. Shows users their pattern at a glance.
+**Solution:**
+- `fl_chart` added as a dependency.
+- `getWeeklyKcal()` repository method returns last-7-days totals (one DB call per day).
+- `_WeeklyChart` widget in the history screen shows a compact (140 px) bar chart above
+  the search field.
+- Today's bar is highlighted in accent amber; a dashed red line marks the daily goal.
+- Tapping a bar filters the history list to that day; tapping the same bar again clears
+  the filter. A chip shows the active day filter and can be dismissed.
 
-**Effort:** medium (~4 h) — new dependency + chart widget.
-
----
-
-### CR-01-F — Export to CSV (not yet implemented)
-
-Share all meal history as a CSV file via the system share sheet (`share_plus` package).
-Privacy-friendly: local only, user chooses destination.
-
-**Effort:** medium (~3 h) — new dependency + CSV serialisation.
+**Effort:** medium (~2 h)
 
 ---
 
-### CR-01-G — Camera overlay / framing guide (not yet implemented)
+### CR-01-F — Export to CSV ✅ implemented
 
-A `CustomPainter` overlay on the camera preview suggesting where to place the plate
-and utensil. Reduces positioning errors → better AI accuracy → fewer corrections needed.
+**Solution:**
+- `share_plus` added as a dependency.
+- `exportCsv()` repository method queries all analyzed meals, builds a CSV
+  (Date, Time, Meal Type, Total kcal, Utensil, Starred, Items), writes to the temp
+  directory, and returns the file path.
+- **Export to CSV** button added to Settings → Storage section. Invokes the system
+  share sheet (`Share.shareXFiles`).
 
-**Effort:** medium (~4 h) — custom painter, no new dependencies.
-
----
-
-### CR-01-H — Favorite meals / quick re-log (not yet implemented)
-
-Star any meal in history. Starred meals appear in a Favorites list. A "Re-log today"
-button copies the meal to the current date without re-photographing. Useful for users
-who eat the same lunch repeatedly.
-
-**Effort:** medium-large (~6 h) — new DB column, new history filter, re-log logic.
+**Effort:** medium (~1 h)
 
 ---
 
-## Priority recommendation
+### CR-01-G — Camera overlay / framing guide ✅ implemented
 
-Implement in this order for maximum user trust and retention:
+**Solution:**
+- `_CameraGuide` widget (a `CustomPainter` overlay) stacked on top of the camera
+  preview when not analyzing.
+- Draws a thin white circle (37 % of screen width radius, centered at ~42 % height)
+  as a plate guide, and a small rounded rectangle to its left as the utensil guide.
+- Emoji label for the active utensil (🍴 / 🔪 / 🥄) and "Plate" text are overlaid
+  via `Positioned` widgets.
+- Opacity kept at 45 % so the guide is visible but not distracting.
 
-1. **CR-01-A** Custom utensil length + spoon ← done
-2. **CR-01-B** Manual ingredient correction ← done
-3. **CR-01-C** Meal type tag — next quick win
-4. **CR-01-D** Daily progress bar — next quick win
-5. **CR-01-E / F / G / H** — plan for a later sprint
+**Effort:** medium (~1 h)
+
+---
+
+### CR-01-H — Favorite meals / quick re-log ✅ implemented
+
+**Solution:**
+- `starred INTEGER NOT NULL DEFAULT 0` column added to `meals` table (DB migration
+  v2 → v3).
+- `Meal.starred` bool field; `MealsRepository.starMeal()` toggles it.
+- History list tile trailing: small star icon above the kcal count — tap to star/unstar
+  without leaving the list.
+- **Starred** filter chip in the history screen header filters the list to starred meals.
+- AppBar of the meal detail screen shows a star `IconButton` to toggle from the detail view.
+- **Re-log today** `OutlinedButton` at the bottom of the meal detail screen: confirmation
+  dialog → new `Meal` row created with `DateTime.now()`, auto-detected meal type, and the
+  same items/photo as the original. Navigates to the new meal's detail screen.
+
+**Effort:** medium-large (~3 h)
+
+---
+
+## Implementation status
+
+All CR-01 items complete as of 2026-05-14.

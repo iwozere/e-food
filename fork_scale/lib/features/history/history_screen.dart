@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,12 +9,29 @@ import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/meal.dart';
 
-final _mealsProvider = FutureProvider.autoDispose.family<List<Meal>, String?>(
-  (ref, query) => ref.read(mealsRepositoryProvider).getMeals(searchQuery: query),
+typedef _MealsFilter = ({String? query, DateTime? day, bool starredOnly});
+
+final _mealsProvider =
+    FutureProvider.autoDispose.family<List<Meal>, _MealsFilter>(
+  (ref, filter) {
+    final day = filter.day;
+    return ref.read(mealsRepositoryProvider).getMeals(
+          searchQuery: filter.query,
+          from: day != null ? DateTime(day.year, day.month, day.day) : null,
+          to: day != null
+              ? DateTime(day.year, day.month, day.day, 23, 59, 59)
+              : null,
+          starredOnly: filter.starredOnly,
+        );
+  },
 );
 
 final _dayTotalProvider = FutureProvider.autoDispose<double>((ref) {
   return ref.read(mealsRepositoryProvider).getDayTotalKcal(DateTime.now());
+});
+
+final _weeklyKcalProvider = FutureProvider.autoDispose<List<double>>((ref) {
+  return ref.read(mealsRepositoryProvider).getWeeklyKcal();
 });
 
 class HistoryScreen extends ConsumerStatefulWidget {
@@ -26,6 +44,8 @@ class HistoryScreen extends ConsumerStatefulWidget {
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   final _searchCtrl = TextEditingController();
   String? _query;
+  DateTime? _selectedDay;
+  bool _showStarredOnly = false;
 
   @override
   void dispose() {
@@ -34,13 +54,24 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 
   void _onSearch(String v) {
-    setState(() => _query = v.isEmpty ? null : v);
+    setState(() {
+      _query = v.isEmpty ? null : v;
+      _selectedDay = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final mealsAsync = ref.watch(_mealsProvider(_query));
+    final filter = (
+      query: _query,
+      day: _selectedDay,
+      starredOnly: _showStarredOnly,
+    );
+    final mealsAsync = ref.watch(_mealsProvider(filter));
     final dayTotalAsync = ref.watch(_dayTotalProvider);
+    final weeklyAsync = ref.watch(_weeklyKcalProvider);
+    final goal =
+        (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
 
     return Scaffold(
       appBar: AppBar(
@@ -61,6 +92,51 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       body: Column(
         children: [
           _DaySummaryBar(dayTotalAsync: dayTotalAsync),
+          weeklyAsync.when(
+            loading: () => const SizedBox(height: 140),
+            error: (_, _) => const SizedBox.shrink(),
+            data: (weekly) => _WeeklyChart(
+              kcals: weekly,
+              goal: goal,
+              selectedDay: _selectedDay,
+              onDaySelected: (day) => setState(() {
+                _selectedDay = day;
+                _query = null;
+                _searchCtrl.clear();
+              }),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Starred'),
+                  avatar: Icon(
+                    _showStarredOnly ? Icons.star : Icons.star_border,
+                    size: 16,
+                    color: _showStarredOnly ? AppColors.accent : null,
+                  ),
+                  selected: _showStarredOnly,
+                  onSelected: (v) => setState(() => _showStarredOnly = v),
+                  selectedColor: AppColors.accent.withValues(alpha: 0.15),
+                  checkmarkColor: AppColors.accent,
+                  showCheckmark: false,
+                ),
+                if (_selectedDay != null) ...[
+                  const SizedBox(width: 8),
+                  Chip(
+                    label: Text(
+                      DateFormat('EEE, MMM d').format(_selectedDay!),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    deleteIcon: const Icon(Icons.close, size: 14),
+                    onDeleted: () => setState(() => _selectedDay = null),
+                  ),
+                ],
+              ],
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(
@@ -74,11 +150,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ),
           Expanded(
             child: mealsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () =>
+                  const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(child: Text('Error: $e')),
               data: (meals) => meals.isEmpty
                   ? const _EmptyState()
-                  : _MealList(meals: meals, onDeleted: () => ref.invalidate(_mealsProvider)),
+                  : _MealList(
+                      meals: meals,
+                      onRefresh: () => ref.invalidate(_mealsProvider),
+                    ),
             ),
           ),
         ],
@@ -87,13 +167,144 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 }
 
+// ── Weekly bar chart ──────────────────────────────────────────────────────────
+
+class _WeeklyChart extends StatelessWidget {
+  final List<double> kcals; // index 0 = 6 days ago, index 6 = today
+  final double goal;
+  final DateTime? selectedDay;
+  final ValueChanged<DateTime?> onDaySelected;
+
+  const _WeeklyChart({
+    required this.kcals,
+    required this.goal,
+    required this.selectedDay,
+    required this.onDaySelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final days = List.generate(7, (i) {
+      final d = today.subtract(Duration(days: 6 - i));
+      return DateTime(d.year, d.month, d.day);
+    });
+
+    final maxKcal = kcals.fold(0.0, (m, v) => v > m ? v : m);
+    final chartMax = (maxKcal > goal ? maxKcal : goal) * 1.15;
+
+    return SizedBox(
+      height: 140,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
+        child: BarChart(
+          BarChartData(
+            maxY: chartMax > 0 ? chartMax : 2500,
+            barGroups: List.generate(7, (i) {
+              final isToday = i == 6;
+              final d = days[i];
+              final sel = selectedDay;
+              final isSelected = sel != null &&
+                  sel.year == d.year &&
+                  sel.month == d.month &&
+                  sel.day == d.day;
+              final color = isSelected
+                  ? AppColors.accent
+                  : (isToday && sel == null)
+                      ? AppColors.accent.withValues(alpha: 0.75)
+                      : AppColors.primary.withValues(alpha: 0.5);
+              return BarChartGroupData(
+                x: i,
+                barRods: [
+                  BarChartRodData(
+                    toY: kcals[i],
+                    color: color,
+                    width: 20,
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(4)),
+                  ),
+                ],
+              );
+            }),
+            extraLinesData: goal > 0
+                ? ExtraLinesData(
+                    horizontalLines: [
+                      HorizontalLine(
+                        y: goal,
+                        color: AppColors.error.withValues(alpha: 0.35),
+                        strokeWidth: 1,
+                        dashArray: [5, 4],
+                        label: HorizontalLineLabel(
+                          show: true,
+                          alignment: Alignment.topRight,
+                          style: const TextStyle(
+                              fontSize: 9, color: AppColors.subtle),
+                          labelResolver: (_) => 'Goal',
+                        ),
+                      ),
+                    ],
+                  )
+                : ExtraLinesData(),
+            titlesData: FlTitlesData(
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 22,
+                  getTitlesWidget: (value, meta) {
+                    final i = value.toInt();
+                    if (i < 0 || i > 6) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        i == 6 ? 'Today' : DateFormat('E').format(days[i]),
+                        style: const TextStyle(
+                            fontSize: 10, color: AppColors.subtle),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              leftTitles:
+                  AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles:
+                  AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              rightTitles:
+                  AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            ),
+            borderData: FlBorderData(show: false),
+            gridData: FlGridData(show: false),
+            barTouchData: BarTouchData(
+              handleBuiltInTouches: false,
+              touchCallback: (event, response) {
+                if (event is FlTapUpEvent && response?.spot != null) {
+                  final i = response!.spot!.touchedBarGroup.x;
+                  final tapped = days[i];
+                  final sel = selectedDay;
+                  final alreadySelected = sel != null &&
+                      sel.year == tapped.year &&
+                      sel.month == tapped.month &&
+                      sel.day == tapped.day;
+                  onDaySelected(alreadySelected ? null : tapped);
+                }
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Day summary bar ───────────────────────────────────────────────────────────
+
 class _DaySummaryBar extends ConsumerWidget {
   final AsyncValue<double> dayTotalAsync;
   const _DaySummaryBar({required this.dayTotalAsync});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final goal = (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
+    final goal =
+        (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
     final total = dayTotalAsync.valueOrNull ?? 0.0;
     final fraction = (total / goal).clamp(0.0, 1.0);
     final overGoal = total > goal;
@@ -136,25 +347,28 @@ class _DaySummaryBar extends ConsumerWidget {
   }
 }
 
+// ── Meal list ─────────────────────────────────────────────────────────────────
+
 class _MealList extends StatelessWidget {
   final List<Meal> meals;
-  final VoidCallback onDeleted;
-  const _MealList({required this.meals, required this.onDeleted});
+  final VoidCallback onRefresh;
+  const _MealList({required this.meals, required this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
       padding: const EdgeInsets.only(top: 8, bottom: 80),
       itemCount: meals.length,
-      itemBuilder: (context, i) => _MealTile(meal: meals[i], onDeleted: onDeleted),
+      itemBuilder: (context, i) =>
+          _MealTile(meal: meals[i], onRefresh: onRefresh),
     );
   }
 }
 
 class _MealTile extends ConsumerWidget {
   final Meal meal;
-  final VoidCallback onDeleted;
-  const _MealTile({required this.meal, required this.onDeleted});
+  final VoidCallback onRefresh;
+  const _MealTile({required this.meal, required this.onRefresh});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -172,12 +386,16 @@ class _MealTile extends ConsumerWidget {
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Delete meal?'),
-            content: const Text('This will permanently delete the meal and its photo.'),
+            content: const Text(
+                'This will permanently delete the meal and its photo.'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel')),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('Delete', style: TextStyle(color: AppColors.error)),
+                child: const Text('Delete',
+                    style: TextStyle(color: AppColors.error)),
               ),
             ],
           ),
@@ -185,31 +403,59 @@ class _MealTile extends ConsumerWidget {
         return confirmed ?? false;
       },
       onDismissed: (_) async {
-        final repo = ref.read(mealsRepositoryProvider);
-        await repo.deleteMeal(meal.id!);
-        onDeleted();
+        await ref.read(mealsRepositoryProvider).deleteMeal(meal.id!);
+        onRefresh();
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Meal deleted')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Meal deleted')));
         }
       },
       child: ListTile(
         onTap: () => context.push('/history/${meal.id}'),
         leading: _Thumbnail(path: meal.photoPath),
         title: Text(
-          meal.name ?? _autoName(meal),
+          meal.pending
+              ? 'Pending — not yet analyzed'
+              : (meal.name ?? _autoName(meal)),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
+          style: meal.pending
+              ? const TextStyle(
+                  color: AppColors.subtle, fontStyle: FontStyle.italic)
+              : null,
         ),
-        subtitle: Text(DateFormat('MMM d, h:mm a').format(meal.createdAt)),
-        trailing: Text(
-          '${meal.totalKcal.round()} kcal',
-          style: const TextStyle(
-            color: AppColors.accent,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        subtitle: Text(_subtitle(meal)),
+        trailing: meal.pending
+            ? const Icon(Icons.schedule, color: AppColors.subtle, size: 20)
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  GestureDetector(
+                    onTap: () async {
+                      await ref
+                          .read(mealsRepositoryProvider)
+                          .starMeal(meal.id!, starred: !meal.starred);
+                      ref.invalidate(_mealsProvider);
+                    },
+                    child: Icon(
+                      meal.starred ? Icons.star : Icons.star_border,
+                      size: 16,
+                      color: meal.starred
+                          ? AppColors.accent
+                          : AppColors.subtle,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${meal.totalKcal.round()} kcal',
+                    style: const TextStyle(
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -219,7 +465,16 @@ class _MealTile extends ConsumerWidget {
     final names = meal.items.take(2).map((i) => i.name).join(', ');
     return meal.items.length > 2 ? '$names…' : names;
   }
+
+  String _subtitle(Meal meal) {
+    final time = DateFormat('MMM d, h:mm a').format(meal.createdAt);
+    if (meal.pending) return time;
+    final typeLabel = _mealTypeLabel(meal.mealType);
+    return typeLabel.isEmpty ? time : '$typeLabel · $time';
+  }
 }
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 class _Thumbnail extends StatelessWidget {
   final String path;
@@ -236,7 +491,8 @@ class _Thumbnail extends StatelessWidget {
               width: 56,
               height: 56,
               color: AppColors.primary.withValues(alpha: 0.1),
-              child: const Icon(Icons.restaurant, color: AppColors.primary),
+              child:
+                  const Icon(Icons.restaurant, color: AppColors.primary),
             ),
     );
   }
@@ -253,7 +509,8 @@ class _EmptyState extends StatelessWidget {
         children: [
           Icon(Icons.restaurant_menu, size: 64, color: AppColors.subtle),
           SizedBox(height: 16),
-          Text('No meals yet', style: TextStyle(color: AppColors.subtle, fontSize: 16)),
+          Text('No meals yet',
+              style: TextStyle(color: AppColors.subtle, fontSize: 16)),
           SizedBox(height: 8),
           Text('Take a photo to log your first meal',
               style: TextStyle(color: AppColors.subtle, fontSize: 13)),
@@ -262,3 +519,11 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
+
+String _mealTypeLabel(String? type) => switch (type) {
+      'breakfast' => 'Breakfast',
+      'lunch' => 'Lunch',
+      'dinner' => 'Dinner',
+      'snack' => 'Snack',
+      _ => '',
+    };

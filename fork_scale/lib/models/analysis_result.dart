@@ -7,7 +7,12 @@ class AnalysisResult {
   final double totalKcal;
   final String? notes;
   final String photoPath;
-  final String utensil; // 'fork' | 'knife'
+  final String utensil; // 'fork' | 'knife' | 'spoon'
+  /// Set when re-analyzing a saved pending meal; results screen will update
+  /// this row instead of inserting a new one.
+  final int? pendingMealId;
+  /// Original capture time for a pending meal; used to auto-detect meal type.
+  final DateTime? capturedAt;
 
   const AnalysisResult({
     required this.utensilDetected,
@@ -17,5 +22,7 @@ class AnalysisResult {
     this.notes,
     required this.photoPath,
     required this.utensil,
+    this.pendingMealId,
+    this.capturedAt,
   });
 }

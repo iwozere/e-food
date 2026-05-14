@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/analysis_result.dart';
+import '../../models/meal.dart';
 import '../../models/meal_item.dart';
+
+String _autoDetectMealType([DateTime? at]) => Meal.detectTypeFromTime(at);
 
 class ResultsState {
   final List<MealItem> items;
@@ -10,6 +13,7 @@ class ResultsState {
   final String? scaleConfidence;
   final String photoPath;
   final String utensil;
+  final String mealType;
   final Set<int> editedIndices;
 
   const ResultsState({
@@ -19,6 +23,7 @@ class ResultsState {
     this.scaleConfidence,
     required this.photoPath,
     required this.utensil,
+    required this.mealType,
     this.editedIndices = const {},
   });
 
@@ -31,6 +36,7 @@ class ResultsState {
     String? scaleConfidence,
     String? photoPath,
     String? utensil,
+    String? mealType,
     Set<int>? editedIndices,
   }) {
     return ResultsState(
@@ -40,6 +46,7 @@ class ResultsState {
       scaleConfidence: scaleConfidence ?? this.scaleConfidence,
       photoPath: photoPath ?? this.photoPath,
       utensil: utensil ?? this.utensil,
+      mealType: mealType ?? this.mealType,
       editedIndices: editedIndices ?? this.editedIndices,
     );
   }
@@ -54,6 +61,7 @@ class ResultsNotifier extends StateNotifier<ResultsState> {
           scaleConfidence: result.scaleConfidence,
           photoPath: result.photoPath,
           utensil: result.utensil,
+          mealType: _autoDetectMealType(result.capturedAt),
         ));
 
   void updateItem(int index, MealItem updated) {
@@ -84,6 +92,10 @@ class ResultsNotifier extends StateNotifier<ResultsState> {
 
   void updateNotes(String notes) {
     state = state.copyWith(notes: notes);
+  }
+
+  void updateMealType(String mealType) {
+    state = state.copyWith(mealType: mealType);
   }
 }
 

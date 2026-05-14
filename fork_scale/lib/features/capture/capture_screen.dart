@@ -12,6 +12,7 @@ import '../../core/services/gemini_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/analysis_result.dart';
+import '../../models/meal.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   const CaptureScreen({super.key});
@@ -27,6 +28,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   bool _isAnalysing = false;
   String _utensil = 'fork';
   String? _errorMessage;
+  // Tracks the history photo path saved during the current analysis attempt so
+  // retryable errors (503 / 429) can offer "Save for later".
+  String? _pendingSavedPath;
 
   @override
   void initState() {
@@ -95,6 +99,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       return;
     }
 
+    _pendingSavedPath = null;
     setState(() => _isAnalysing = true);
     try {
       final imageService = ref.read(imageServiceProvider);
@@ -107,6 +112,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       ]);
       final apiBytes = futures[0] as dynamic;
       final savedPath = futures[1] as String;
+      _pendingSavedPath = savedPath; // available to error handlers below
 
       final lengths = await ref.read(utensilLengthsProvider.future);
       final lengthCm = lengths[_utensil] ?? 18.5;
@@ -117,6 +123,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         utensilLengthCm: lengthCm,
       );
 
+      _pendingSavedPath = null;
       if (!mounted) return;
       context.push(
         '/results',
@@ -131,12 +138,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         ),
       );
     } on GeminiRateLimitException {
-      _showError('Rate limit reached. Please wait a minute and try again.');
+      _showRetryError('Rate limit reached — save photo for later?');
     } on GeminiApiException catch (e) {
       if (e.statusCode == 401 || e.statusCode == 403) {
         _showApiKeyError();
       } else if (e.statusCode == 503) {
-        _showError('Gemini is overloaded — try again in a moment.', detail: e.body);
+        _showRetryError('Gemini is overloaded — save photo for later?');
       } else {
         _showError('API error (${e.statusCode}).', detail: e.body);
       }
@@ -150,6 +157,47 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     } finally {
       if (mounted) setState(() => _isAnalysing = false);
     }
+  }
+
+  /// Shows a retryable-error SnackBar. If a photo was already saved this
+  /// attempt, offers a "Save for later" action to create a pending meal.
+  void _showRetryError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 8),
+        action: _pendingSavedPath != null
+            ? SnackBarAction(label: 'Save for later', onPressed: _savePending)
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _savePending() async {
+    final path = _pendingSavedPath;
+    if (path == null) return;
+    _pendingSavedPath = null;
+    final repo = ref.read(mealsRepositoryProvider);
+    await repo.insertMeal(Meal(
+      createdAt: DateTime.now(),
+      photoPath: path,
+      totalKcal: 0,
+      utensil: _utensil,
+      modelUsed: 'gemini',
+      mealType: Meal.detectTypeFromTime(),
+      pending: true,
+    ));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Photo saved — analyze it any time from History.'),
+        action: SnackBarAction(
+          label: 'History',
+          onPressed: () => context.push('/history'),
+        ),
+      ),
+    );
   }
 
   void _showApiKeyError() {
@@ -217,6 +265,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         fit: StackFit.expand,
         children: [
           _buildViewfinder(),
+          if (!_isAnalysing) _CameraGuide(utensil: _utensil),
           _buildOverlay(),
           if (_isAnalysing) _buildAnalysingOverlay(),
         ],
@@ -444,4 +493,89 @@ class _GalleryButton extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Camera framing guide ──────────────────────────────────────────────────────
+
+class _CameraGuide extends StatelessWidget {
+  final String utensil;
+  const _CameraGuide({required this.utensil});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final w = constraints.maxWidth;
+      final h = constraints.maxHeight;
+      final r = w * 0.37;
+      final cx = w / 2;
+      final cy = h * 0.42;
+      return Stack(
+        children: [
+          CustomPaint(
+            painter: _GuidePainter(cx: cx, cy: cy, r: r),
+            child: const SizedBox.expand(),
+          ),
+          // Plate label
+          Positioned(
+            left: cx - 18,
+            top: cy - r - 22,
+            child: _label('Plate'),
+          ),
+          // Utensil label
+          Positioned(
+            left: cx - r - 64,
+            top: cy - 10,
+            child: _label(_utensilEmoji),
+          ),
+        ],
+      );
+    });
+  }
+
+  String get _utensilEmoji => switch (utensil) {
+        'fork' => '🍴',
+        'knife' => '🔪',
+        _ => '🥄',
+      };
+
+  Widget _label(String text) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.black38,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(text,
+            style: const TextStyle(color: Colors.white70, fontSize: 11)),
+      );
+}
+
+class _GuidePainter extends CustomPainter {
+  final double cx, cy, r;
+  const _GuidePainter({required this.cx, required this.cy, required this.r});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.45)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    // Plate circle
+    canvas.drawCircle(Offset(cx, cy), r, paint);
+
+    // Utensil guide: thin rounded rectangle to the left of the circle
+    final ux = cx - r - 16;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+            center: Offset(ux, cy), width: 10, height: r * 1.25),
+        const Radius.circular(5),
+      ),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _GuidePainter old) =>
+      old.cx != cx || old.cy != cy || old.r != r;
 }
