@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -51,9 +52,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final storage = ref.read(secureStorageProvider);
     final prefs = await SharedPreferences.getInstance();
-    final key = await storage.read(key: 'gemini_api_key');
+
+    // One-time migration: move key from flutter_secure_storage → SharedPreferences.
+    // Handles users who had the key saved before this change.
+    String? key = prefs.getString('gemini_api_key');
+    if (key == null) {
+      try {
+        const old = FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        );
+        final migrated = await old.read(key: 'gemini_api_key');
+        if (migrated != null && migrated.isNotEmpty) {
+          await prefs.setString('gemini_api_key', migrated);
+          await old.delete(key: 'gemini_api_key');
+          key = migrated;
+        }
+      } catch (_) {}
+    }
+
     final forkCm = prefs.getDouble('fork_length_cm') ?? 18.5;
     final knifeCm = prefs.getDouble('knife_length_cm') ?? 21.0;
     final spoonCm = prefs.getDouble('spoon_length_cm') ?? 20.0;
@@ -69,8 +86,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _spoonLengthCtrl.text = spoonCm.toStringAsFixed(1);
       _loading = false;
     });
-    // Re-activate the provider in case startup read lost the race against the
-    // Android Keystore becoming available (common after app updates).
     if (key != null && key.isNotEmpty) {
       ref.invalidate(geminiApiKeyProvider);
     }
@@ -78,11 +93,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _saveApiKey() async {
     final key = _apiKeyCtrl.text.trim();
-    final storage = ref.read(secureStorageProvider);
     final messenger = ScaffoldMessenger.of(context);
+    final prefs = await SharedPreferences.getInstance();
 
     if (key.isEmpty) {
-      await storage.delete(key: 'gemini_api_key');
+      await prefs.remove('gemini_api_key');
       ref.invalidate(geminiApiKeyProvider);
       messenger.showSnackBar(const SnackBar(content: Text('API key removed')));
       return;
@@ -95,7 +110,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     switch (result) {
       case KeyValidationResult.valid:
-        await storage.write(key: 'gemini_api_key', value: key);
+        await prefs.setString('gemini_api_key', key);
         ref.invalidate(geminiApiKeyProvider);
         messenger.showSnackBar(SnackBar(
           content: const Text('API key saved and verified ✓'),
@@ -108,7 +123,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ));
       case KeyValidationResult.networkError:
         // Save anyway — user may be offline, don't block them
-        await storage.write(key: 'gemini_api_key', value: key);
+        await prefs.setString('gemini_api_key', key);
         ref.invalidate(geminiApiKeyProvider);
         messenger.showSnackBar(SnackBar(
           content: const Text('Key saved (could not verify — no internet)'),
