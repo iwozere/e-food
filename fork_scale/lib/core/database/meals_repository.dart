@@ -101,7 +101,7 @@ class MealsRepository {
   Future<List<Meal>> _searchMeals(String query, {int limit = 50, int offset = 0}) async {
     final db = await AppDatabase.mealsDb;
     final ftsRows = await db.rawQuery(
-      "SELECT rowid FROM meals_fts WHERE meals_fts MATCH ? ORDER BY rank LIMIT ? OFFSET ?",
+      "SELECT rowid FROM meals_fts WHERE meals_fts MATCH ? LIMIT ? OFFSET ?",
       [query, limit, offset],
     );
     final ids = ftsRows.map((r) => r['rowid'] as int).toList();

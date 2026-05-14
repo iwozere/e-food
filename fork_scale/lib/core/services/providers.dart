@@ -8,7 +8,9 @@ import 'image_service.dart';
 import 'usda_service.dart';
 
 final secureStorageProvider = Provider<FlutterSecureStorage>(
-  (_) => const FlutterSecureStorage(),
+  (_) => const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  ),
 );
 
 final geminiApiKeyProvider = FutureProvider<String?>((ref) async {

@@ -55,7 +55,7 @@ class AppDatabase {
     ''');
     await db.execute('CREATE INDEX idx_meals_created ON meals(created_at DESC)');
     await db.execute(
-      "CREATE VIRTUAL TABLE meals_fts USING fts5(name, notes, content=meals, content_rowid=id)",
+      "CREATE VIRTUAL TABLE meals_fts USING fts4(name, notes)",
     );
   }
 

@@ -142,7 +142,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       }
     } on GeminiParseException catch (e) {
       final msg = e.truncated
-          ? 'Response was cut off — too many items. Try a simpler plate.'
+          ? 'Response was cut off — please retake the photo.'
           : 'Could not read results — please retake the photo.';
       _showError(msg, detail: e.rawText);
     } catch (e) {
