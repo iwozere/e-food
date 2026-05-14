@@ -10,6 +10,7 @@ class ResultsState {
   final String? scaleConfidence;
   final String photoPath;
   final String utensil;
+  final Set<int> editedIndices;
 
   const ResultsState({
     required this.items,
@@ -18,6 +19,7 @@ class ResultsState {
     this.scaleConfidence,
     required this.photoPath,
     required this.utensil,
+    this.editedIndices = const {},
   });
 
   double get totalKcal => items.fold(0.0, (sum, i) => sum + i.computedKcal);
@@ -29,6 +31,7 @@ class ResultsState {
     String? scaleConfidence,
     String? photoPath,
     String? utensil,
+    Set<int>? editedIndices,
   }) {
     return ResultsState(
       items: items ?? this.items,
@@ -37,6 +40,7 @@ class ResultsState {
       scaleConfidence: scaleConfidence ?? this.scaleConfidence,
       photoPath: photoPath ?? this.photoPath,
       utensil: utensil ?? this.utensil,
+      editedIndices: editedIndices ?? this.editedIndices,
     );
   }
 }
@@ -55,7 +59,10 @@ class ResultsNotifier extends StateNotifier<ResultsState> {
   void updateItem(int index, MealItem updated) {
     final items = List.of(state.items);
     items[index] = updated.copyWith(totalKcal: updated.computedKcal);
-    state = state.copyWith(items: items);
+    state = state.copyWith(
+      items: items,
+      editedIndices: {...state.editedIndices, index},
+    );
   }
 
   void deleteItem(int index) {

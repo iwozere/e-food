@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/services/gemini_service.dart';
@@ -32,6 +33,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initCamera();
+    _loadDefaultUtensil();
+  }
+
+  Future<void> _loadDefaultUtensil() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('default_utensil') ?? 'fork';
+    if (mounted) setState(() => _utensil = saved);
   }
 
   @override
@@ -100,9 +108,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       final apiBytes = futures[0] as dynamic;
       final savedPath = futures[1] as String;
 
+      final lengths = await ref.read(utensilLengthsProvider.future);
+      final lengthCm = lengths[_utensil] ?? 18.5;
+
       final result = await gemini.analyzeImage(
         imageBytes: apiBytes,
         utensil: _utensil,
+        utensilLengthCm: lengthCm,
       );
 
       if (!mounted) return;
@@ -129,7 +141,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         _showError('API error (${e.statusCode}).', detail: e.body);
       }
     } on GeminiParseException catch (e) {
-      _showError('Could not read results — please retake the photo.', detail: e.rawText);
+      final msg = e.truncated
+          ? 'Response was cut off — too many items. Try a simpler plate.'
+          : 'Could not read results — please retake the photo.';
+      _showError(msg, detail: e.rawText);
     } catch (e) {
       _showError('An unexpected error occurred.', detail: e.toString());
     } finally {
@@ -262,6 +277,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                 _UtensilToggle(
                   utensil: _utensil,
                   onChanged: (v) => setState(() => _utensil = v),
+                  lengths: ref.watch(utensilLengthsProvider).valueOrNull ??
+                      {'fork': 18.5, 'knife': 21.0, 'spoon': 20.0},
                 ),
                 const SizedBox(height: 24),
                 Row(
@@ -310,7 +327,7 @@ class _InstructionBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: const Text(
-        'Place a fork or knife beside the plate',
+        'Place utensil beside the plate as scale',
         style: TextStyle(color: Colors.white, fontSize: 12),
       ),
     );
@@ -320,8 +337,18 @@ class _InstructionBanner extends StatelessWidget {
 class _UtensilToggle extends StatelessWidget {
   final String utensil;
   final ValueChanged<String> onChanged;
+  final Map<String, double> lengths;
 
-  const _UtensilToggle({required this.utensil, required this.onChanged});
+  const _UtensilToggle({
+    required this.utensil,
+    required this.onChanged,
+    required this.lengths,
+  });
+
+  String _label(String key, String emoji) {
+    final cm = (lengths[key] ?? 0).toStringAsFixed(1);
+    return '$emoji $cm cm';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -333,8 +360,9 @@ class _UtensilToggle extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _Tab(label: '🍴 Fork (18.5 cm)', value: 'fork', current: utensil, onTap: onChanged),
-          _Tab(label: '🔪 Knife (21 cm)', value: 'knife', current: utensil, onTap: onChanged),
+          _Tab(label: _label('fork', '🍴'), value: 'fork', current: utensil, onTap: onChanged),
+          _Tab(label: _label('knife', '🔪'), value: 'knife', current: utensil, onTap: onChanged),
+          _Tab(label: _label('spoon', '🥄'), value: 'spoon', current: utensil, onTap: onChanged),
         ],
       ),
     );

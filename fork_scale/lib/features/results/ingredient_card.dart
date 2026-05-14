@@ -8,12 +8,14 @@ class IngredientCard extends StatefulWidget {
   final MealItem item;
   final ValueChanged<MealItem> onChanged;
   final VoidCallback onDelete;
+  final bool isEdited;
 
   const IngredientCard({
     super.key,
     required this.item,
     required this.onChanged,
     required this.onDelete,
+    this.isEdited = false,
   });
 
   @override
@@ -54,7 +56,12 @@ class _IngredientCardState extends State<IngredientCard> {
   void _onKcalChanged(String v) {
     final k = double.tryParse(v) ?? _current.kcalPer100g;
     widget.onChanged(
-        _current.copyWith(kcalPer100g: k, totalKcal: _current.weightG / 100 * k));
+      _current.copyWith(
+        kcalPer100g: k,
+        totalKcal: _current.weightG / 100 * k,
+        usdaMatched: false,
+      ),
+    );
   }
 
   void _stepWeight(int delta) {
@@ -89,7 +96,25 @@ class _IngredientCardState extends State<IngredientCard> {
                     ),
                   ),
                 ),
-                if (!_current.usdaMatched)
+                if (widget.isEdited)
+                  Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.edit, size: 10, color: AppColors.accent),
+                        SizedBox(width: 2),
+                        Text('edited',
+                            style: TextStyle(fontSize: 10, color: AppColors.accent)),
+                      ],
+                    ),
+                  ),
+                if (!_current.usdaMatched && !widget.isEdited)
                   Tooltip(
                     message: 'Calorie value from AI (not USDA database)',
                     child: Icon(Icons.science_outlined, size: 16, color: AppColors.subtle),

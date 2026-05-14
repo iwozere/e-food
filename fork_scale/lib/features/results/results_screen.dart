@@ -102,6 +102,7 @@ class _ResultsBody extends ConsumerWidget {
             itemBuilder: (context, i) => IngredientCard(
               key: ValueKey('item_$i'),
               item: state.items[i],
+              isEdited: state.editedIndices.contains(i),
               onChanged: (updated) => notifier.updateItem(i, updated),
               onDelete: () => notifier.deleteItem(i),
             ),

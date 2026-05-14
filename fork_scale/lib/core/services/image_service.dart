@@ -6,11 +6,11 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 class ImageService {
-  /// Resizes [source] to max 800px longest side for Gemini API call.
+  /// Resizes [source] to max 1536px longest side for Gemini API call.
   /// Runs in a background isolate. Returns JPEG bytes.
   Future<Uint8List> resizeForApi(File source) async {
     final bytes = await source.readAsBytes();
-    return Isolate.run(() => _resize(bytes, 800));
+    return Isolate.run(() => _resize(bytes, 1536));
   }
 
   /// Saves the photo at max 1200px, returns the absolute path.

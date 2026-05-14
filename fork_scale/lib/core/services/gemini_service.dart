@@ -35,11 +35,16 @@ class GeminiService {
 
   Future<GeminiAnalysisResult> analyzeImage({
     required Uint8List imageBytes,
-    required String utensil, // 'fork' | 'knife'
+    required String utensil, // 'fork' | 'knife' | 'spoon'
+    required double utensilLengthCm,
   }) async {
-    final utensilDesc = utensil == 'fork'
-        ? 'dinner fork (18.5 cm)'
-        : 'dinner knife (21.0 cm)';
+    final utensilName = switch (utensil) {
+      'fork' => 'dinner fork',
+      'knife' => 'dinner knife',
+      'spoon' => 'tablespoon / soup spoon',
+      _ => utensil,
+    };
+    final utensilDesc = '$utensilName (${utensilLengthCm.toStringAsFixed(1)} cm)';
 
     final prompt = '''
 You are a nutrition analyst. A standard $utensilDesc is visible in the image as a scale reference.
@@ -82,7 +87,7 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
       ],
       'generationConfig': {
         'temperature': 0.2,
-        'maxOutputTokens': 1024,
+        'maxOutputTokens': 4096,
       },
     });
 
@@ -105,17 +110,38 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
     return _parseAndEnrich(text);
   }
 
+  /// Attempts to close a truncated JSON response at the last complete item object.
+  /// Returns the decoded map on success, null if the fragment is unrecoverable.
+  Map<String, dynamic>? _repairTruncated(String s) {
+    // Find the last closing brace of a complete item (i.e. "}" followed only by
+    // whitespace, commas, or the start of an incomplete next item before EOF).
+    final lastBrace = s.lastIndexOf('}');
+    if (lastBrace < 0) return null;
+    // Close: end the items array and the root object.
+    final candidate = '${s.substring(0, lastBrace + 1)}]}';
+    try {
+      return jsonDecode(candidate) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<GeminiAnalysisResult> _parseAndEnrich(String rawText) async {
     late Map<String, dynamic> json;
+    final cleaned = rawText
+        .replaceAll(RegExp(r'```json\s*'), '')
+        .replaceAll(RegExp(r'```\s*'), '')
+        .trim();
     try {
-      // Strip accidental markdown fences if present
-      final cleaned = rawText
-          .replaceAll(RegExp(r'```json\s*'), '')
-          .replaceAll(RegExp(r'```\s*'), '')
-          .trim();
       json = jsonDecode(cleaned) as Map<String, dynamic>;
     } catch (_) {
-      throw GeminiParseException(rawText);
+      // Try to salvage truncated JSON by closing at the last complete item.
+      final repaired = _repairTruncated(cleaned);
+      if (repaired != null) {
+        json = repaired;
+      } else {
+        throw GeminiParseException(rawText, truncated: !cleaned.endsWith('}'));
+      }
     }
 
     final rawItems = (json['items'] as List<dynamic>?) ?? [];
@@ -184,5 +210,6 @@ class GeminiApiException implements Exception {
 
 class GeminiParseException implements Exception {
   final String rawText;
-  const GeminiParseException(this.rawText);
+  final bool truncated;
+  const GeminiParseException(this.rawText, {this.truncated = false});
 }

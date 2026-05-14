@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:flutter/services.dart';
+
 import '../../core/services/gemini_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
@@ -20,10 +22,16 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _apiKeyCtrl = TextEditingController();
+  final _forkLengthCtrl = TextEditingController();
+  final _knifeLengthCtrl = TextEditingController();
+  final _spoonLengthCtrl = TextEditingController();
   bool _obscureKey = true;
   bool _validating = false;
   String _utensil = 'fork';
   int _dailyGoal = 2000;
+  double _forkLengthCm = 18.5;
+  double _knifeLengthCm = 21.0;
+  double _spoonLengthCm = 20.0;
   bool _loading = true;
 
   @override
@@ -35,6 +43,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
+    _forkLengthCtrl.dispose();
+    _knifeLengthCtrl.dispose();
+    _spoonLengthCtrl.dispose();
     super.dispose();
   }
 
@@ -42,12 +53,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final storage = ref.read(secureStorageProvider);
     final prefs = await SharedPreferences.getInstance();
     final key = await storage.read(key: 'gemini_api_key');
+    final forkCm = prefs.getDouble('fork_length_cm') ?? 18.5;
+    final knifeCm = prefs.getDouble('knife_length_cm') ?? 21.0;
+    final spoonCm = prefs.getDouble('spoon_length_cm') ?? 20.0;
     setState(() {
       _apiKeyCtrl.text = key ?? '';
       _utensil = prefs.getString('default_utensil') ?? 'fork';
       _dailyGoal = prefs.getInt('daily_goal') ?? 2000;
+      _forkLengthCm = forkCm;
+      _knifeLengthCm = knifeCm;
+      _spoonLengthCm = spoonCm;
+      _forkLengthCtrl.text = forkCm.toStringAsFixed(1);
+      _knifeLengthCtrl.text = knifeCm.toStringAsFixed(1);
+      _spoonLengthCtrl.text = spoonCm.toStringAsFixed(1);
       _loading = false;
     });
+    // Re-activate the provider in case startup read lost the race against the
+    // Android Keystore becoming available (common after app updates).
+    if (key != null && key.isNotEmpty) {
+      ref.invalidate(geminiApiKeyProvider);
+    }
   }
 
   Future<void> _saveApiKey() async {
@@ -95,7 +120,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('default_utensil', _utensil);
     await prefs.setInt('daily_goal', _dailyGoal);
+    await prefs.setDouble('fork_length_cm', _forkLengthCm);
+    await prefs.setDouble('knife_length_cm', _knifeLengthCm);
+    await prefs.setDouble('spoon_length_cm', _spoonLengthCm);
     ref.invalidate(dailyGoalProvider);
+    ref.invalidate(utensilLengthsProvider);
   }
 
   Future<String> _storageSummary() async {
@@ -158,14 +187,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 _savePrefs();
               },
               child: Column(
-                children: const [
-                  RadioListTile<String>(
-                    title: Text('🍴 Fork (18.5 cm)'),
+                children: [
+                  _UtensilTile(
+                    emoji: '🍴',
+                    label: 'Fork',
                     value: 'fork',
+                    ctrl: _forkLengthCtrl,
+                    onLengthChanged: (v) { setState(() => _forkLengthCm = v); _savePrefs(); },
                   ),
-                  RadioListTile<String>(
-                    title: Text('🔪 Knife (21 cm)'),
+                  const Divider(height: 0, indent: 56),
+                  _UtensilTile(
+                    emoji: '🔪',
+                    label: 'Knife',
                     value: 'knife',
+                    ctrl: _knifeLengthCtrl,
+                    onLengthChanged: (v) { setState(() => _knifeLengthCm = v); _savePrefs(); },
+                  ),
+                  const Divider(height: 0, indent: 56),
+                  _UtensilTile(
+                    emoji: '🥄',
+                    label: 'Spoon',
+                    value: 'spoon',
+                    ctrl: _spoonLengthCtrl,
+                    onLengthChanged: (v) { setState(() => _spoonLengthCm = v); _savePrefs(); },
                   ),
                 ],
               ),
@@ -345,6 +389,49 @@ class _ApiKeyHint extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _UtensilTile extends StatelessWidget {
+  final String emoji;
+  final String label;
+  final String value;
+  final TextEditingController ctrl;
+  final ValueChanged<double> onLengthChanged;
+
+  const _UtensilTile({
+    required this.emoji,
+    required this.label,
+    required this.value,
+    required this.ctrl,
+    required this.onLengthChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return RadioListTile<String>(
+      value: value,
+      title: Text('$emoji $label'),
+      secondary: SizedBox(
+        width: 80,
+        child: TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+          textAlign: TextAlign.center,
+          decoration: const InputDecoration(
+            suffixText: 'cm',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            isDense: true,
+          ),
+          onChanged: (v) {
+            final parsed = double.tryParse(v);
+            if (parsed != null && parsed > 0) onLengthChanged(parsed);
+          },
+        ),
+      ),
     );
   }
 }

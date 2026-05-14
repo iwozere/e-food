@@ -26,12 +26,14 @@ class UsdaService {
       likeArgs,
     );
     if (rows.isNotEmpty) {
-      // Pick the shortest description (most specific match)
-      rows.sort((a, b) =>
-          (a['description'] as String).length.compareTo((b['description'] as String).length));
+      // sqflite returns an unmodifiable list — copy before sorting
+      final sorted = rows.toList()
+        ..sort((a, b) => (a['description'] as String)
+            .length
+            .compareTo((b['description'] as String).length));
       return (
-        kcalPer100g: (rows.first['kcal_per_100g'] as num).toDouble(),
-        matchedName: rows.first['description'] as String,
+        kcalPer100g: (sorted.first['kcal_per_100g'] as num).toDouble(),
+        matchedName: sorted.first['description'] as String,
       );
     }
     return null;

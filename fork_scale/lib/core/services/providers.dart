@@ -33,3 +33,12 @@ final dailyGoalProvider = FutureProvider<int>((ref) async {
   final prefs = await SharedPreferences.getInstance();
   return prefs.getInt('daily_goal') ?? 2000;
 });
+
+final utensilLengthsProvider = FutureProvider<Map<String, double>>((ref) async {
+  final prefs = await SharedPreferences.getInstance();
+  return {
+    'fork': prefs.getDouble('fork_length_cm') ?? 18.5,
+    'knife': prefs.getDouble('knife_length_cm') ?? 21.0,
+    'spoon': prefs.getDouble('spoon_length_cm') ?? 20.0,
+  };
+});
