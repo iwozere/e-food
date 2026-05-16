@@ -28,8 +28,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   bool _isAnalysing = false;
   String _utensil = 'fork';
   String? _errorMessage;
-  // Tracks the history photo path saved during the current analysis attempt so
-  // retryable errors (503 / 429) can offer "Save for later".
   String? _pendingSavedPath;
 
   @override
@@ -105,14 +103,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       final imageService = ref.read(imageServiceProvider);
       final filename = '${const Uuid().v4()}.jpg';
 
-      // Resize for API and save for history in parallel
       final futures = await Future.wait([
         imageService.resizeForApi(file),
         imageService.saveForHistory(file, filename: filename),
       ]);
       final apiBytes = futures[0] as dynamic;
       final savedPath = futures[1] as String;
-      _pendingSavedPath = savedPath; // available to error handlers below
+      _pendingSavedPath = savedPath;
 
       final lengths = await ref.read(utensilLengthsProvider.future);
       final lengthCm = lengths[_utensil] ?? 18.5;
@@ -159,8 +156,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     }
   }
 
-  /// Shows a retryable-error SnackBar. If a photo was already saved this
-  /// attempt, offers a "Save for later" action to create a pending meal.
   void _showRetryError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -194,7 +189,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         content: const Text('Photo saved — analyze it any time from History.'),
         action: SnackBarAction(
           label: 'History',
-          onPressed: () => context.push('/history'),
+          onPressed: () => context.go('/history'),
         ),
       ),
     );
@@ -206,7 +201,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         content: const Text('Gemini API key missing or invalid.'),
         action: SnackBarAction(
           label: 'Settings',
-          onPressed: () => context.push('/settings'),
+          onPressed: () => context.go('/settings'),
         ),
       ),
     );
@@ -292,7 +287,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     return SafeArea(
       child: Column(
         children: [
-          // Top bar
+          // Top bar: instruction banner + barcode button
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
@@ -300,27 +295,19 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
               children: [
                 _InstructionBanner(),
                 IconButton(
-                  icon: const Icon(Icons.settings, color: Colors.white),
-                  onPressed: () => context.push('/settings'),
+                  icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+                  tooltip: 'Scan barcode',
+                  onPressed: () => context.push('/scan'),
                 ),
               ],
             ),
           ),
-          // History shortcut
-          Align(
-            alignment: Alignment.topRight,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: IconButton(
-                icon: const Icon(Icons.history, color: Colors.white),
-                onPressed: () => context.push('/history'),
-              ),
-            ),
-          ),
           const Spacer(),
+          // Recent meals strip (CR-03-C)
+          _RecentMealsStrip(),
           // Utensil toggle + controls
           Padding(
-            padding: const EdgeInsets.only(bottom: 32, left: 32, right: 32),
+            padding: const EdgeInsets.only(bottom: 16, left: 32, right: 32),
             child: Column(
               children: [
                 _UtensilToggle(
@@ -361,6 +348,95 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Recent meals strip ────────────────────────────────────────────────────────
+
+final _recentMealsProvider = FutureProvider.autoDispose<_RecentMealsData>((ref) async {
+  final repo = ref.read(mealsRepositoryProvider);
+  final recent = await repo.getRecentDistinct(limit: 5);
+  final todayNames = await repo.getMealNamesToday();
+  return _RecentMealsData(recent: recent, todayNames: todayNames);
+});
+
+class _RecentMealsData {
+  final List<Meal> recent;
+  final Set<String> todayNames;
+  const _RecentMealsData({required this.recent, required this.todayNames});
+}
+
+class _RecentMealsStrip extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dataAsync = ref.watch(_recentMealsProvider);
+    final meals = dataAsync.valueOrNull?.recent ?? <Meal>[];
+    final todayNames = dataAsync.valueOrNull?.todayNames ?? <String>{};
+    if (meals.isEmpty) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: 44,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: meals.length,
+        itemBuilder: (context, i) {
+          final meal = meals[i];
+          final name = meal.name ?? '';
+          final kcal = meal.totalKcal.round();
+          final loggedToday = todayNames.contains(name);
+
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: loggedToday
+                  ? null
+                  : () async {
+                      await ref
+                          .read(mealsRepositoryProvider)
+                          .copyMealToToday(meal);
+                      ref.invalidate(_recentMealsProvider);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('$name logged')),
+                        );
+                      }
+                    },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: loggedToday
+                      ? Colors.white12
+                      : Colors.white.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: loggedToday ? Colors.white24 : Colors.white38,
+                  ),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(
+                    name,
+                    style: TextStyle(
+                      color: loggedToday ? Colors.white38 : Colors.white,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    loggedToday ? 'Logged today' : '$kcal kcal',
+                    style: TextStyle(
+                      color: loggedToday ? Colors.white38 : AppColors.accent,
+                      fontSize: 11,
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -515,13 +591,11 @@ class _CameraGuide extends StatelessWidget {
             painter: _GuidePainter(cx: cx, cy: cy, r: r),
             child: const SizedBox.expand(),
           ),
-          // Plate label
           Positioned(
             left: cx - 18,
             top: cy - r - 22,
             child: _label('Plate'),
           ),
-          // Utensil label
           Positioned(
             left: cx - r - 64,
             top: cy - 10,
@@ -560,10 +634,8 @@ class _GuidePainter extends CustomPainter {
       ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke;
 
-    // Plate circle
     canvas.drawCircle(Offset(cx, cy), r, paint);
 
-    // Utensil guide: thin rounded rectangle to the left of the circle
     final ux = cx - r - 16;
     canvas.drawRRect(
       RRect.fromRectAndRadius(

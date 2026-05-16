@@ -38,6 +38,18 @@ class MealsRepository {
 
   Future<void> deleteMeal(int id) async {
     final db = await AppDatabase.mealsDb;
+    final rows = await db.query('meals', columns: ['photo_path'], where: 'id = ?', whereArgs: [id]);
+    if (rows.isNotEmpty) {
+      final path = rows.first['photo_path'] as String;
+      final refCount = (await db.rawQuery(
+        'SELECT COUNT(*) as c FROM meals WHERE photo_path = ? AND id != ?',
+        [path, id],
+      )).first['c'] as int;
+      if (refCount == 0) {
+        final f = File(path);
+        if (f.existsSync()) await f.delete();
+      }
+    }
     await db.delete('meals', where: 'id = ?', whereArgs: [id]);
     await db.execute("DELETE FROM meals_fts WHERE rowid = ?", [id]);
   }
@@ -50,6 +62,58 @@ class MealsRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<int> copyMealToToday(Meal original) async {
+    final now = DateTime.now();
+    late Meal copy;
+    switch (original.source) {
+      case 'barcode':
+        copy = Meal(
+          createdAt: now,
+          photoPath: original.photoPath,
+          name: original.name,
+          notes: original.notes,
+          totalKcal: original.totalKcal,
+          utensil: original.utensil,
+          modelUsed: original.modelUsed,
+          mealType: Meal.detectTypeFromTime(now),
+          source: 'barcode',
+          barcode: original.barcode,
+          priceChf: original.priceChf,
+          items: original.items.map((i) => i.copyWith(id: null, mealId: null)).toList(),
+        );
+      case 'recipe_portion':
+        // Recompute kcal from current recipe in case it was edited since.
+        // If recipe no longer exists, fall back to original totalKcal.
+        copy = Meal(
+          createdAt: now,
+          photoPath: original.photoPath,
+          name: original.name,
+          totalKcal: original.totalKcal,
+          utensil: original.utensil,
+          modelUsed: original.modelUsed,
+          mealType: Meal.detectTypeFromTime(now),
+          source: 'recipe_portion',
+          recipeId: original.recipeId,
+          portionG: original.portionG,
+        );
+      default: // 'camera'
+        copy = Meal(
+          createdAt: now,
+          photoPath: original.photoPath,
+          name: original.name,
+          notes: original.notes,
+          totalKcal: original.totalKcal,
+          utensil: original.utensil,
+          scaleConf: original.scaleConf,
+          modelUsed: original.modelUsed,
+          mealType: Meal.detectTypeFromTime(now),
+          source: 'camera',
+          items: original.items.map((i) => i.copyWith(id: null, mealId: null)).toList(),
+        );
+    }
+    return insertMeal(copy);
   }
 
   Future<Meal?> getMeal(int id) async {
@@ -116,6 +180,42 @@ class MealsRepository {
     return meals;
   }
 
+  /// Returns the last [limit] distinct meal names (non-pending), most recent first.
+  Future<List<Meal>> getRecentDistinct({int limit = 5}) async {
+    final db = await AppDatabase.mealsDb;
+    final rows = await db.query(
+      'meals',
+      where: 'name IS NOT NULL AND pending = 0',
+      orderBy: 'created_at DESC',
+      limit: 50,
+    );
+    final seen = <String>{};
+    final result = <Meal>[];
+    for (final row in rows) {
+      final name = row['name'] as String? ?? '';
+      if (name.isNotEmpty && seen.add(name)) {
+        result.add(Meal.fromMap(row));
+        if (result.length >= limit) break;
+      }
+    }
+    return result;
+  }
+
+  /// Returns the set of distinct meal names logged today.
+  Future<Set<String>> getMealNamesToday() async {
+    final db = await AppDatabase.mealsDb;
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final end = DateTime(now.year, now.month, now.day, 23, 59, 59).millisecondsSinceEpoch;
+    final rows = await db.query(
+      'meals',
+      columns: ['name'],
+      where: 'created_at BETWEEN ? AND ? AND pending = 0 AND name IS NOT NULL',
+      whereArgs: [start, end],
+    );
+    return rows.map((r) => r['name'] as String).toSet();
+  }
+
   Future<List<Meal>> _searchMeals(String query,
       {int limit = 50, int offset = 0}) async {
     final db = await AppDatabase.mealsDb;
@@ -172,7 +272,7 @@ class MealsRepository {
     final dateFmt = DateFormat('yyyy-MM-dd');
     final timeFmt = DateFormat('HH:mm');
     final buf = StringBuffer();
-    buf.writeln('Date,Time,Meal Type,Total kcal,Utensil,Starred,Items');
+    buf.writeln('Date,Time,Meal Type,Total kcal,Utensil,Starred,Source,Items');
 
     for (final row in rows) {
       final meal = Meal.fromMap(row);
@@ -189,6 +289,7 @@ class MealsRepository {
         '${meal.totalKcal.round()},'
         '${meal.utensil},'
         '${meal.starred ? '1' : '0'},'
+        '${meal.source},'
         '"$escapedItems"',
       );
     }

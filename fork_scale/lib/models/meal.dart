@@ -13,6 +13,11 @@ class Meal {
   final String? mealType; // 'breakfast' | 'lunch' | 'dinner' | 'snack'
   final bool pending;
   final bool starred;
+  final String source; // 'camera' | 'barcode' | 'recipe_portion'
+  final String? barcode;
+  final double? priceChf;
+  final int? recipeId;
+  final double? portionG;
   final List<MealItem> items;
 
   const Meal({
@@ -28,6 +33,11 @@ class Meal {
     this.mealType,
     this.pending = false,
     this.starred = false,
+    this.source = 'camera',
+    this.barcode,
+    this.priceChf,
+    this.recipeId,
+    this.portionG,
     this.items = const [],
   });
 
@@ -53,6 +63,11 @@ class Meal {
     String? mealType,
     bool? pending,
     bool? starred,
+    String? source,
+    String? barcode,
+    double? priceChf,
+    int? recipeId,
+    double? portionG,
     List<MealItem>? items,
   }) {
     return Meal(
@@ -68,6 +83,11 @@ class Meal {
       mealType: mealType ?? this.mealType,
       pending: pending ?? this.pending,
       starred: starred ?? this.starred,
+      source: source ?? this.source,
+      barcode: barcode ?? this.barcode,
+      priceChf: priceChf ?? this.priceChf,
+      recipeId: recipeId ?? this.recipeId,
+      portionG: portionG ?? this.portionG,
       items: items ?? this.items,
     );
   }
@@ -85,11 +105,19 @@ class Meal {
         'meal_type': mealType,
         'pending': pending ? 1 : 0,
         'starred': starred ? 1 : 0,
+        'source': source,
+        'barcode': barcode,
+        'price_chf': priceChf,
+        'recipe_id': recipeId,
+        'portion_g': portionG,
       };
 
-  factory Meal.fromMap(Map<String, dynamic> map, {List<MealItem> items = const []}) => Meal(
+  factory Meal.fromMap(Map<String, dynamic> map,
+          {List<MealItem> items = const []}) =>
+      Meal(
         id: map['id'] as int?,
-        createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
+        createdAt:
+            DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
         photoPath: map['photo_path'] as String,
         name: map['name'] as String?,
         notes: map['notes'] as String?,
@@ -100,6 +128,11 @@ class Meal {
         mealType: map['meal_type'] as String?,
         pending: (map['pending'] as int? ?? 0) != 0,
         starred: (map['starred'] as int? ?? 0) != 0,
+        source: map['source'] as String? ?? 'camera',
+        barcode: map['barcode'] as String?,
+        priceChf: (map['price_chf'] as num?)?.toDouble(),
+        recipeId: map['recipe_id'] as int?,
+        portionG: (map['portion_g'] as num?)?.toDouble(),
         items: items,
       );
 }

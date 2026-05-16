@@ -3,7 +3,12 @@
     "allow": [
       "PowerShell(Get-ChildItem *)",
       "Bash(flutter analyze *)",
-      "Bash(dart analyze *)"
+      "Bash(dart analyze *)",
+      "Bash(flutter pub *)",
+      "WebFetch(domain:naehrwertdaten.ch)",
+      "Bash(python tool/build_sfcd.py)",
+      "Bash(Remove-Item \"C:/dev/cursor/e-food/fork_scale/tool/_sfcd_cache.xlsx\" -ErrorAction SilentlyContinue)",
+      "Bash(Write-Host \"Cache removed\")"
     ]
   }
 }

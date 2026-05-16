@@ -23,7 +23,7 @@ class AppDatabase {
     final path = p.join(dir.path, 'fork_scale.db');
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createMealsSchema,
       onUpgrade: _upgradeMealsSchema,
     );
@@ -43,7 +43,12 @@ class AppDatabase {
         model_used  TEXT NOT NULL,
         meal_type   TEXT,
         pending     INTEGER NOT NULL DEFAULT 0,
-        starred     INTEGER NOT NULL DEFAULT 0
+        starred     INTEGER NOT NULL DEFAULT 0,
+        source      TEXT NOT NULL DEFAULT 'camera',
+        barcode     TEXT REFERENCES cached_products(barcode),
+        price_chf   REAL,
+        recipe_id   INTEGER REFERENCES recipes(id) ON DELETE SET NULL,
+        portion_g   REAL
       )
     ''');
     await db.execute('''
@@ -57,7 +62,51 @@ class AppDatabase {
         sort_order    INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await db.execute('''
+      CREATE TABLE cached_products (
+        barcode       TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        brand         TEXT,
+        pack_size_g   REAL,
+        kcal_per_100g REAL NOT NULL,
+        protein_g     REAL,
+        carbs_g       REAL,
+        fat_g         REAL,
+        image_url     TEXT,
+        source        TEXT NOT NULL,
+        fetched_at    INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE recipes (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT NOT NULL,
+        yield_g       REAL NOT NULL,
+        kcal_per_100g REAL NOT NULL,
+        photo_path    TEXT,
+        notes         TEXT,
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE recipe_items (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipe_id     INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+        name          TEXT NOT NULL,
+        weight_g      REAL NOT NULL,
+        kcal_per_100g REAL NOT NULL,
+        total_kcal    REAL NOT NULL,
+        source        TEXT NOT NULL DEFAULT 'manual',
+        barcode       TEXT,
+        sort_order    INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
     await db.execute('CREATE INDEX idx_meals_created ON meals(created_at DESC)');
+    await db.execute('CREATE INDEX idx_cached_products_fetched ON cached_products(fetched_at)');
+    await db.execute('CREATE INDEX idx_recipe_items_recipe ON recipe_items(recipe_id)');
+    await db.execute('CREATE INDEX idx_meals_recipe ON meals(recipe_id)');
+    await db.execute('CREATE INDEX idx_meals_source ON meals(source)');
     await db.execute(
       "CREATE VIRTUAL TABLE meals_fts USING fts4(name, notes)",
     );
@@ -74,6 +123,57 @@ class AppDatabase {
       await db.execute(
           "ALTER TABLE meals ADD COLUMN starred INTEGER NOT NULL DEFAULT 0");
     }
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE cached_products (
+          barcode       TEXT PRIMARY KEY,
+          name          TEXT NOT NULL,
+          brand         TEXT,
+          pack_size_g   REAL,
+          kcal_per_100g REAL NOT NULL,
+          protein_g     REAL,
+          carbs_g       REAL,
+          fat_g         REAL,
+          image_url     TEXT,
+          source        TEXT NOT NULL,
+          fetched_at    INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE recipes (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          name          TEXT NOT NULL,
+          yield_g       REAL NOT NULL,
+          kcal_per_100g REAL NOT NULL,
+          photo_path    TEXT,
+          notes         TEXT,
+          created_at    INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE recipe_items (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          recipe_id     INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+          name          TEXT NOT NULL,
+          weight_g      REAL NOT NULL,
+          kcal_per_100g REAL NOT NULL,
+          total_kcal    REAL NOT NULL,
+          source        TEXT NOT NULL DEFAULT 'manual',
+          barcode       TEXT,
+          sort_order    INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await db.execute("ALTER TABLE meals ADD COLUMN source TEXT NOT NULL DEFAULT 'camera'");
+      await db.execute("ALTER TABLE meals ADD COLUMN barcode TEXT REFERENCES cached_products(barcode)");
+      await db.execute("ALTER TABLE meals ADD COLUMN price_chf REAL");
+      await db.execute("ALTER TABLE meals ADD COLUMN recipe_id INTEGER REFERENCES recipes(id) ON DELETE SET NULL");
+      await db.execute("ALTER TABLE meals ADD COLUMN portion_g REAL");
+      await db.execute('CREATE INDEX idx_cached_products_fetched ON cached_products(fetched_at)');
+      await db.execute('CREATE INDEX idx_recipe_items_recipe ON recipe_items(recipe_id)');
+      await db.execute('CREATE INDEX idx_meals_recipe ON meals(recipe_id)');
+      await db.execute('CREATE INDEX idx_meals_source ON meals(source)');
+    }
   }
 
   static Future<Database> _openUsdaDb() async {
@@ -85,5 +185,22 @@ class AppDatabase {
       await File(dest).writeAsBytes(bytes, flush: true);
     }
     return openDatabase(dest, readOnly: true);
+  }
+
+  /// Opens the bundled SFCD SQLite asset, copying to documents if needed.
+  /// Returns null if the asset does not exist yet (before build_sfcd.py is run).
+  static Future<Database?> openSfcdDb() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final dest = p.join(dir.path, 'sfcd.db');
+      if (!File(dest).existsSync()) {
+        final data = await rootBundle.load('assets/db/sfcd.db');
+        final bytes = data.buffer.asUint8List();
+        await File(dest).writeAsBytes(bytes, flush: true);
+      }
+      return openDatabase(dest, readOnly: true);
+    } catch (_) {
+      return null;
+    }
   }
 }

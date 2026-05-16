@@ -9,10 +9,16 @@ import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/analysis_result.dart';
 import '../../models/meal.dart';
+import '../../models/recipe.dart';
 
 final _mealProvider = FutureProvider.autoDispose.family<Meal?, int>(
   (ref, id) => ref.read(mealsRepositoryProvider).getMeal(id),
 );
+
+final _recipeForMealProvider =
+    FutureProvider.autoDispose.family<Recipe?, int>((ref, recipeId) {
+  return ref.read(recipesRepositoryProvider).getRecipe(recipeId);
+});
 
 class MealDetailScreen extends ConsumerStatefulWidget {
   final int mealId;
@@ -33,7 +39,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
           content: const Text('Gemini API key missing.'),
           action: SnackBarAction(
             label: 'Settings',
-            onPressed: () => context.push('/settings'),
+            onPressed: () => context.go('/settings'),
           ),
         ),
       );
@@ -93,40 +99,9 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     }
   }
 
-  Future<void> _reLog(Meal original) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Re-log this meal?'),
-        content: Text(
-          'A copy will be saved with today\'s date as '
-          '${_mealTypeLabel(Meal.detectTypeFromTime())}.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Re-log')),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
+  Future<void> _copyToToday(Meal original) async {
     final repo = ref.read(mealsRepositoryProvider);
-    final newMeal = Meal(
-      createdAt: DateTime.now(),
-      photoPath: original.photoPath,
-      notes: original.notes,
-      totalKcal: original.totalKcal,
-      utensil: original.utensil,
-      scaleConf: original.scaleConf,
-      modelUsed: original.modelUsed,
-      items: original.items,
-      mealType: Meal.detectTypeFromTime(),
-    );
-    final newId = await repo.insertMeal(newMeal);
+    final newId = await repo.copyMealToToday(original);
     if (!mounted) return;
     context.go('/history/$newId');
   }
@@ -167,7 +142,15 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                     analyzing: _analyzing,
                     onAnalyze: () => _analyzeNow(meal),
                   )
-                : _MealDetail(meal: meal, onReLog: () => _reLog(meal)),
+                : meal.source == 'recipe_portion'
+                    ? _RecipePortionDetail(
+                        meal: meal,
+                        onCopy: () => _copyToToday(meal),
+                      )
+                    : _MealDetail(
+                        meal: meal,
+                        onCopy: () => _copyToToday(meal),
+                      ),
       ),
     );
   }
@@ -240,12 +223,12 @@ class _PendingBody extends StatelessWidget {
   }
 }
 
-// ── Analyzed state ─────────────────────────────────────────────────────────────
+// ── Camera / barcode meal detail ──────────────────────────────────────────────
 
 class _MealDetail extends StatelessWidget {
   final Meal meal;
-  final VoidCallback onReLog;
-  const _MealDetail({required this.meal, required this.onReLog});
+  final VoidCallback onCopy;
+  const _MealDetail({required this.meal, required this.onCopy});
 
   @override
   Widget build(BuildContext context) {
@@ -276,15 +259,18 @@ class _MealDetail extends StatelessWidget {
                       label: '${meal.totalKcal.round()} kcal',
                       color: AppColors.accent,
                     ),
-                    _InfoChip(
-                      label: switch (meal.utensil) {
-                        'fork' => '🍴 Fork',
-                        'knife' => '🔪 Knife',
-                        'spoon' => '🥄 Spoon',
-                        _ => meal.utensil,
-                      },
-                      color: AppColors.primary,
-                    ),
+                    if (meal.source == 'barcode')
+                      const _InfoChip(label: '🔖 Barcode', color: AppColors.primary)
+                    else
+                      _InfoChip(
+                        label: switch (meal.utensil) {
+                          'fork' => '🍴 Fork',
+                          'knife' => '🔪 Knife',
+                          'spoon' => '🥄 Spoon',
+                          _ => meal.utensil,
+                        },
+                        color: AppColors.primary,
+                      ),
                     if (meal.scaleConf != null)
                       _InfoChip(
                         label: 'Conf: ${meal.scaleConf}',
@@ -336,9 +322,9 @@ class _MealDetail extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             child: OutlinedButton.icon(
-              onPressed: onReLog,
-              icon: const Icon(Icons.replay),
-              label: const Text('Re-log today'),
+              onPressed: onCopy,
+              icon: const Icon(Icons.copy_outlined),
+              label: const Text('Copy to today'),
             ),
           ),
         ),
@@ -357,6 +343,117 @@ class _MealDetail extends StatelessWidget {
         'medium' => Colors.orange,
         _ => Colors.red,
       };
+}
+
+// ── Recipe-portion meal detail ────────────────────────────────────────────────
+
+class _RecipePortionDetail extends ConsumerWidget {
+  final Meal meal;
+  final VoidCallback onCopy;
+  const _RecipePortionDetail({required this.meal, required this.onCopy});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recipeAsync = meal.recipeId != null
+        ? ref.watch(_recipeForMealProvider(meal.recipeId!))
+        : const AsyncData<Recipe?>(null);
+    final recipe = recipeAsync.valueOrNull;
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: _PhotoHeader(path: meal.photoPath)),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  meal.name ?? 'Recipe meal',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  DateFormat('EEEE, MMMM d, y · h:mm a').format(meal.createdAt),
+                  style: const TextStyle(color: AppColors.subtle, fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                Wrap(spacing: 8, runSpacing: 6, children: [
+                  _InfoChip(
+                    label: '${meal.totalKcal.round()} kcal',
+                    color: AppColors.accent,
+                  ),
+                  if (meal.portionG != null)
+                    _InfoChip(
+                      label: '${meal.portionG!.round()} g portion',
+                      color: AppColors.primary,
+                    ),
+                  const _InfoChip(label: '🍳 Recipe', color: AppColors.primary),
+                  if (meal.mealType != null)
+                    _InfoChip(
+                      label: _mealTypeLabel(meal.mealType),
+                      color: AppColors.accent,
+                    ),
+                ]),
+              ],
+            ),
+          ),
+        ),
+        if (recipe != null) ...[
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Text('Ingredients (from recipe)',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          SliverList.builder(
+            itemCount: recipe.items.length,
+            itemBuilder: (context, i) {
+              final item = recipe.items[i];
+              return ListTile(
+                title: Text(item.name),
+                subtitle: Text(
+                    '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                trailing: Text('${item.totalKcal.round()} kcal',
+                    style: const TextStyle(
+                        color: AppColors.accent, fontWeight: FontWeight.bold)),
+              );
+            },
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Row(children: [
+                TextButton.icon(
+                  onPressed: () =>
+                      context.push('/recipes/${recipe.id}'),
+                  icon: const Icon(Icons.menu_book, size: 16),
+                  label: const Text('Go to recipe'),
+                ),
+                TextButton.icon(
+                  onPressed: () =>
+                      context.push('/recipes/${recipe.id}/edit'),
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Edit recipe'),
+                ),
+              ]),
+            ),
+          ),
+        ],
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            child: OutlinedButton.icon(
+              onPressed: onCopy,
+              icon: const Icon(Icons.copy_outlined),
+              label: const Text('Copy to today'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 // ── Shared widgets ─────────────────────────────────────────────────────────────

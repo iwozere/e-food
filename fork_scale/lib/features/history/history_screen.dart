@@ -74,21 +74,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Meal History'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () => context.push('/settings'),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.go('/'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.camera_alt),
-      ),
+      appBar: AppBar(title: const Text('Meal History')),
+      floatingActionButton: null,
       body: Column(
         children: [
           _DaySummaryBar(dayTotalAsync: dayTotalAsync),
@@ -410,54 +397,104 @@ class _MealTile extends ConsumerWidget {
               .showSnackBar(const SnackBar(content: Text('Meal deleted')));
         }
       },
-      child: ListTile(
-        onTap: () => context.push('/history/${meal.id}'),
-        leading: _Thumbnail(path: meal.photoPath),
-        title: Text(
-          meal.pending
-              ? 'Pending — not yet analyzed'
-              : (meal.name ?? _autoName(meal)),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: meal.pending
-              ? const TextStyle(
-                  color: AppColors.subtle, fontStyle: FontStyle.italic)
-              : null,
+      child: GestureDetector(
+        onLongPress: () => _showContextMenu(context, ref),
+        child: ListTile(
+          onTap: () => context.push('/history/${meal.id}'),
+          leading: _Thumbnail(path: meal.photoPath, source: meal.source),
+          title: Text(
+            meal.pending
+                ? 'Pending — not yet analyzed'
+                : (meal.name ?? _autoName(meal)),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: meal.pending
+                ? const TextStyle(
+                    color: AppColors.subtle, fontStyle: FontStyle.italic)
+                : null,
+          ),
+          subtitle: Text(_subtitle(meal)),
+          trailing: meal.pending
+              ? const Icon(Icons.schedule, color: AppColors.subtle, size: 20)
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    GestureDetector(
+                      onTap: () async {
+                        await ref
+                            .read(mealsRepositoryProvider)
+                            .starMeal(meal.id!, starred: !meal.starred);
+                        ref.invalidate(_mealsProvider);
+                      },
+                      child: Icon(
+                        meal.starred ? Icons.star : Icons.star_border,
+                        size: 16,
+                        color: meal.starred
+                            ? AppColors.accent
+                            : AppColors.subtle,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${meal.totalKcal.round()} kcal',
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    _SourceBadge(source: meal.source),
+                  ],
+                ),
         ),
-        subtitle: Text(_subtitle(meal)),
-        trailing: meal.pending
-            ? const Icon(Icons.schedule, color: AppColors.subtle, size: 20)
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  GestureDetector(
-                    onTap: () async {
-                      await ref
-                          .read(mealsRepositoryProvider)
-                          .starMeal(meal.id!, starred: !meal.starred);
-                      ref.invalidate(_mealsProvider);
-                    },
-                    child: Icon(
-                      meal.starred ? Icons.star : Icons.star_border,
-                      size: 16,
-                      color: meal.starred
-                          ? AppColors.accent
-                          : AppColors.subtle,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${meal.totalKcal.round()} kcal',
-                    style: const TextStyle(
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
       ),
     );
+  }
+
+  Future<void> _showContextMenu(BuildContext context, WidgetRef ref) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('Copy to today'),
+              onTap: () => Navigator.pop(context, 'copy'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: AppColors.error),
+              title: const Text('Delete', style: TextStyle(color: AppColors.error)),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    if (action == 'copy') {
+      final newId = await ref.read(mealsRepositoryProvider).copyMealToToday(meal);
+      ref.invalidate(_mealsProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Copied ${meal.name ?? 'meal'} to today'),
+            action: SnackBarAction(
+              label: 'View',
+              onPressed: () => context.push('/history/$newId'),
+            ),
+          ),
+        );
+      }
+    } else if (action == 'delete') {
+      await ref.read(mealsRepositoryProvider).deleteMeal(meal.id!);
+      onRefresh();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Meal deleted')));
+      }
+    }
   }
 
   String _autoName(Meal meal) {
@@ -478,7 +515,8 @@ class _MealTile extends ConsumerWidget {
 
 class _Thumbnail extends StatelessWidget {
   final String path;
-  const _Thumbnail({required this.path});
+  final String source;
+  const _Thumbnail({required this.path, this.source = 'camera'});
 
   @override
   Widget build(BuildContext context) {
@@ -491,10 +529,35 @@ class _Thumbnail extends StatelessWidget {
               width: 56,
               height: 56,
               color: AppColors.primary.withValues(alpha: 0.1),
-              child:
-                  const Icon(Icons.restaurant, color: AppColors.primary),
+              child: Center(
+                child: Text(
+                  switch (source) {
+                    'barcode' => '🔖',
+                    'recipe_portion' => '🍳',
+                    _ => '',
+                  },
+                  style: const TextStyle(fontSize: 24),
+                ),
+              ),
             ),
     );
+  }
+}
+
+class _SourceBadge extends StatelessWidget {
+  final String source;
+  const _SourceBadge({required this.source});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (source) {
+      'barcode' => '🔖 Barcode',
+      'recipe_portion' => '🍳 Recipe',
+      _ => null,
+    };
+    if (label == null) return const SizedBox.shrink();
+    return Text(label,
+        style: const TextStyle(fontSize: 10, color: AppColors.subtle));
   }
 }
 

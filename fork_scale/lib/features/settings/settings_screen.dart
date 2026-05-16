@@ -27,6 +27,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _forkLengthCtrl = TextEditingController();
   final _knifeLengthCtrl = TextEditingController();
   final _spoonLengthCtrl = TextEditingController();
+  final _pepestoCtrl = TextEditingController();
   bool _obscureKey = true;
   bool _validating = false;
   String _utensil = 'fork';
@@ -35,6 +36,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   double _knifeLengthCm = 21.0;
   double _spoonLengthCm = 20.0;
   bool _loading = true;
+  bool _integrationsExpanded = false;
 
   @override
   void initState() {
@@ -48,6 +50,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _forkLengthCtrl.dispose();
     _knifeLengthCtrl.dispose();
     _spoonLengthCtrl.dispose();
+    _pepestoCtrl.dispose();
     super.dispose();
   }
 
@@ -71,6 +74,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       } catch (_) {}
     }
 
+    final pepestoKey = prefs.getString('pepesto_api_key') ?? '';
+
     final forkCm = prefs.getDouble('fork_length_cm') ?? 18.5;
     final knifeCm = prefs.getDouble('knife_length_cm') ?? 21.0;
     final spoonCm = prefs.getDouble('spoon_length_cm') ?? 20.0;
@@ -84,6 +89,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _forkLengthCtrl.text = forkCm.toStringAsFixed(1);
       _knifeLengthCtrl.text = knifeCm.toStringAsFixed(1);
       _spoonLengthCtrl.text = spoonCm.toStringAsFixed(1);
+      _pepestoCtrl.text = pepestoKey;
       _loading = false;
     });
     if (key != null && key.isNotEmpty) {
@@ -379,6 +385,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          // Integrations section (collapsed by default)
+          GestureDetector(
+            onTap: () => setState(() => _integrationsExpanded = !_integrationsExpanded),
+            child: Row(
+              children: [
+                _SectionHeader('Integrations'),
+                const Spacer(),
+                Icon(
+                  _integrationsExpanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  color: AppColors.subtle,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
+          if (_integrationsExpanded)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: _pepestoCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Pepesto API key (optional)',
+                        hintText: 'Enables CHF price lookup for Swiss products',
+                      ),
+                      onChanged: (v) async {
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setString('pepesto_api_key', v.trim());
+                        ref.invalidate(pepestoApiKeyProvider);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Leave blank to disable price lookup. Get a key at pepesto.com.',
+                      style: TextStyle(fontSize: 12, color: AppColors.subtle),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           const SizedBox(height: 32),
         ],
       ),
