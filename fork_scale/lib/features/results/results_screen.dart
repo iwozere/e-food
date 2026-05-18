@@ -47,7 +47,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             pending: false,
           ));
           if (!mounted) return;
-          context.go('/history/$pendingId');
+          context.pop();
           return;
         }
       }
@@ -65,7 +65,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       );
       final id = await repo.insertMeal(meal);
       if (!mounted) return;
-      context.go('/history/$id');
+      context.go('/history');
+      context.push('/history/$id');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

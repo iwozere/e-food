@@ -21,7 +21,10 @@ class RecipesScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Recipes')),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/recipes/new'),
+        onPressed: () async {
+          await context.push('/recipes/new');
+          ref.invalidate(_recipesProvider);
+        },
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         child: const Icon(Icons.add),
@@ -30,7 +33,10 @@ class RecipesScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (recipes) => recipes.isEmpty
-            ? const _EmptyState()
+            ? _EmptyState(onNewRecipe: () async {
+                await context.push('/recipes/new');
+                ref.invalidate(_recipesProvider);
+              })
             : _RecipeGrid(
                 recipes: recipes,
                 onRefresh: () => ref.invalidate(_recipesProvider),
@@ -134,7 +140,8 @@ class _RecipeCard extends ConsumerWidget {
 
     switch (action) {
       case 'edit':
-        context.push('/recipes/${recipe.id}/edit');
+        await context.push('/recipes/${recipe.id}/edit');
+        onRefresh();
       case 'duplicate':
         final repo = ref.read(recipesRepositoryProvider);
         final now = DateTime.now();
@@ -152,15 +159,15 @@ class _RecipeCard extends ConsumerWidget {
       case 'delete':
         final confirmed = await showDialog<bool>(
           context: context,
-          builder: (_) => AlertDialog(
+          builder: (dialogContext) => AlertDialog(
             title: const Text('Delete recipe?'),
             content: Text('Delete "${recipe.name}"?'),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.pop(context, false),
+                  onPressed: () => Navigator.pop(dialogContext, false),
                   child: const Text('Cancel')),
               TextButton(
-                onPressed: () => Navigator.pop(context, true),
+                onPressed: () => Navigator.pop(dialogContext, true),
                 child: const Text('Delete',
                     style: TextStyle(color: AppColors.error)),
               ),
@@ -197,7 +204,8 @@ class _RecipePhoto extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  final VoidCallback onNewRecipe;
+  const _EmptyState({required this.onNewRecipe});
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +222,7 @@ class _EmptyState extends StatelessWidget {
               style: TextStyle(fontSize: 13, color: AppColors.subtle)),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: () => context.push('/recipes/new'),
+            onPressed: onNewRecipe,
             icon: const Icon(Icons.add),
             label: const Text('New recipe'),
           ),

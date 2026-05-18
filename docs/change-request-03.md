@@ -5,11 +5,12 @@
 ForkScale v3 schema (meals + meal_items + starred + meal_type + pending).
 All CR-01 and CR-02 items are complete as of 2026-05-14.
 
-This document adds three independent but related features raised on 2026-05-16:
+This document adds four independent but related features:
 
-- **CR-03-A** — Barcode scanner with Swiss product database lookup (COOP, Migros, ALDI, LIDL, Denner, etc.)
-- **CR-03-B** — Recipe builder: define a dish from raw ingredients, then log any portion of it
-- **CR-03-C** — Copy meal from history: re-log any past meal to today without re-scanning or re-photographing
+- **CR-03-A** — Barcode scanner with Swiss product database lookup (COOP, Migros, ALDI, LIDL, Denner, etc.) · raised 2026-05-16
+- **CR-03-B** — Recipe builder: define a dish from raw ingredients, then log any portion of it · raised 2026-05-16
+- **CR-03-C** — Copy meal from history: re-log any past meal to today without re-scanning or re-photographing · raised 2026-05-16
+- **CR-03-D** — Edit saved meal items from Meal Detail: correct AI-assigned weights and kcal/100g values after saving · raised 2026-05-18
 
 ---
 
@@ -390,6 +391,121 @@ No additional migration block needed for CR-03-C.
 
 ---
 
+---
+
+### CR-03-D — Edit saved meal items from Meal Detail
+
+**Problem:** The AI occasionally assigns plausible-looking but wrong kcal/100g values.
+For example, an apple may be correctly sized at 180 g but assigned 396 kcal/100g (a
+value typical of dried fruit) instead of ~52 kcal/100g. Once a meal is saved the Meal
+Detail screen is entirely read-only — there is no way to correct these values.
+
+**Solution:**
+
+#### D.1 — "Edit" entry point in Meal Detail Screen
+
+- Add an **edit `IconButton`** (`Icons.edit_outlined`) to the `AppBar` of `MealDetailScreen`.
+- Shown only for `source = 'camera'` meals (barcode meals are corrected via the
+  Barcode Result Screen's inline editable fields; recipe-portion meals are corrected
+  via the Recipe Editor).
+- Also shown for `pending = false` only — pending meals go through the "Analyze now"
+  → Results Screen path instead.
+
+#### D.2 — Meal Edit Screen
+
+A new screen (`MealEditScreen`) reachable at `/history/:id/edit`.
+
+Layout — identical to the Analysis Results Screen, but pre-populated from the saved meal:
+
+```
+┌─────────────────────────────────────┐
+│  ← Edit meal                        │
+├─────────────────────────────────────┤
+│  [Total kcal banner — live]         │
+├─────────────────────────────────────┤
+│  [IngredientCard]  name / weight /  │
+│                    kcal/100g        │
+│  [IngredientCard]  ...              │
+│  [+ Add item]                       │
+├─────────────────────────────────────┤
+│  Meal type: [chip row]              │
+│  Notes: ___________________         │
+├─────────────────────────────────────┤
+│  [Save changes]  ← sticky bottom    │
+└─────────────────────────────────────┘
+```
+
+Editable fields per ingredient card (same `IngredientCard` widget already used in
+Results Screen):
+
+| Field | Editable | Notes |
+|---|---|---|
+| Name | ✅ | free text |
+| Weight (g) | ✅ | numeric |
+| kcal/100g | ✅ | numeric — the primary correction point |
+| Total kcal | computed | `weight_g / 100 × kcal_per_100g`, shown read-only |
+
+- **"Edited" badge**: shown on a card whenever `kcal/100g` was changed from its
+  originally saved value (same visual as the Results Screen).
+- **Add / delete items**: same `+` button and delete icon per card as Results Screen.
+- **Total kcal banner**: recalculates live as the user edits any value.
+- **Meal type** chip row and **Notes** field: both editable, pre-filled from the
+  saved meal.
+
+#### D.3 — Save behaviour
+
+On "Save changes":
+
+1. Call `MealsRepository.updateMeal(meal.copyWith(items: editedItems, totalKcal: newTotal, mealType: ..., notes: ...))`.
+   `updateMeal` already deletes and re-inserts `meal_items`, so no schema change is needed.
+2. `context.pop()` back to Meal Detail.
+3. Meal Detail's `_mealProvider` is invalidated (same `await push` + `ref.invalidate`
+   pattern established in the pending-meal fix) → screen shows updated values immediately.
+
+#### D.4 — Navigation
+
+```
+Meal Detail Screen
+  └─ [✏ Edit] (AppBar)  →  /history/:id/edit  (MealEditScreen)
+                               → [Save changes] → context.pop()
+                               → Meal Detail refreshes via ref.invalidate
+```
+
+Route added to `app_router.dart`:
+```dart
+GoRoute(
+  path: '/history/:id/edit',
+  builder: (context, state) {
+    final id = int.parse(state.pathParameters['id']!);
+    return MealEditScreen(mealId: id);
+  },
+),
+```
+
+#### D.5 — Reuse of existing components
+
+| Component | Reused as-is | Notes |
+|---|---|---|
+| `IngredientCard` | ✅ | no changes needed |
+| `MealsRepository.updateMeal` | ✅ | already handles item replacement |
+| Total-kcal banner widget | extract from `ResultsScreen._TotalBanner` | minor refactor |
+| Meal-type chip row | extract from `ResultsScreen._MealTypeRow` | minor refactor |
+
+No new DB schema or packages required.
+
+#### D.6 — Excluded from scope
+
+- Editing the **photo** of an existing meal — out of scope; the photo is already tied
+  to the AI analysis and changing it would require a new analysis pass.
+- Editing **barcode meals** — the Barcode Result Screen already provides inline editing
+  before saving; post-save correction is a separate, lower-priority item.
+- Editing **recipe-portion meals** — weight / kcal corrections belong in the Recipe
+  Editor; the meal's `total_kcal` is then recalculated on the next "Log a portion".
+
+**Effort:** small-medium (~3–4 h)
+
+---
+
 ## DB migration summary
 
 All three features share a single migration block: **v3 → v4**.
@@ -522,11 +638,12 @@ History Screen (additions)
 ## Implementation order (suggested)
 
 1. **DB migration v3 → v4** (schema only, no UI) — unblocks everything.
-2. **CR-03-A** barcode scanner + Open Food Facts lookup + Barcode Result Screen.
-3. **CR-03-B** recipe data model + Recipe List + Recipe Editor (no SFCD bundle yet).
-4. **CR-03-B** SFCD asset bundle + ingredient autocomplete.
-5. **CR-03-B** Log Portion Sheet + recipe-portion history card.
-6. **CR-03-C** copy-meal context menu + Recent meals strip.
+2. **CR-03-D** meal edit screen — self-contained, no schema change, high user value, quick win.
+3. **CR-03-A** barcode scanner + Open Food Facts lookup + Barcode Result Screen.
+4. **CR-03-B** recipe data model + Recipe List + Recipe Editor (no SFCD bundle yet).
+5. **CR-03-B** SFCD asset bundle + ingredient autocomplete.
+6. **CR-03-B** Log Portion Sheet + recipe-portion history card.
+7. **CR-03-C** copy-meal context menu + Recent meals strip.
 
 ---
 
@@ -550,4 +667,9 @@ History Screen (additions)
 
 ## Implementation status
 
-All CR-03 items **pending** as of 2026-05-16.
+| Item | Status | Notes |
+|---|---|---|
+| CR-03-A | pending | — |
+| CR-03-B | **complete** | Recipe builder fully implemented as of 2026-05-16 |
+| CR-03-C | **complete** | Copy-meal action implemented as of 2026-05-16 |
+| CR-03-D | pending | Raised 2026-05-18; no schema change needed |

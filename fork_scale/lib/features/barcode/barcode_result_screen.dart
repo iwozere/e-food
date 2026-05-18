@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/services/open_food_facts_service.dart';
 import '../../core/services/providers.dart';
@@ -363,52 +364,225 @@ class _MealTypeChips extends StatelessWidget {
   }
 }
 
-class _NotFoundScreen extends StatelessWidget {
+class _NotFoundScreen extends ConsumerStatefulWidget {
   final String barcode;
   final bool isTimeout;
   const _NotFoundScreen({required this.barcode, required this.isTimeout});
 
   @override
+  ConsumerState<_NotFoundScreen> createState() => _NotFoundScreenState();
+}
+
+class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
+  bool _showForm = false;
+
+  // manual-entry form state
+  final _nameCtrl = TextEditingController();
+  final _kcalCtrl = TextEditingController();
+  final _amountCtrl = TextEditingController(text: '100');
+  double _amount = 100;
+  String _mealType = Meal.detectTypeFromTime();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _kcalCtrl.dispose();
+    _amountCtrl.dispose();
+    super.dispose();
+  }
+
+  double get _totalKcal {
+    final k = double.tryParse(_kcalCtrl.text) ?? 0;
+    return _amount / 100 * k;
+  }
+
+  Future<void> _openContribute() async {
+    final uri = Uri.parse(
+        'https://world.openfoodfacts.org/product/${widget.barcode}');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void _stepAmount(int delta) {
+    final v = (_amount + delta).clamp(0, 9999).toDouble();
+    setState(() {
+      _amount = v;
+      _amountCtrl.text = v.toStringAsFixed(0);
+    });
+  }
+
+  Future<void> _logManual() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product name is required')),
+      );
+      return;
+    }
+    final kcal = double.tryParse(_kcalCtrl.text) ?? 0;
+    final total = _amount / 100 * kcal;
+    setState(() => _saving = true);
+    try {
+      await ref.read(mealsRepositoryProvider).insertMeal(Meal(
+        createdAt: DateTime.now(),
+        photoPath: '',
+        name: name,
+        totalKcal: total,
+        utensil: 'fork',
+        modelUsed: 'barcode',
+        mealType: _mealType,
+        source: 'barcode',
+        barcode: widget.barcode,
+        items: [
+          MealItem(
+            name: name,
+            weightG: _amount,
+            kcalPer100g: kcal,
+            totalKcal: total,
+          ),
+        ],
+      ));
+      if (!mounted) return;
+      context.go('/history');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Product not found')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      appBar: AppBar(
+        title: Text(_showForm ? 'Enter manually' : 'Product not found'),
+        leading: _showForm
+            ? BackButton(onPressed: () => setState(() => _showForm = false))
+            : null,
+      ),
+      body: _showForm ? _buildForm() : _buildNotFound(),
+    );
+  }
+
+  Widget _buildNotFound() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.search_off, size: 64, color: AppColors.subtle),
+          const SizedBox(height: 16),
+          Text(
+            widget.isTimeout
+                ? 'Could not reach product database.'
+                : 'No product found for barcode ${widget.barcode}.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.subtle),
+          ),
+          const SizedBox(height: 24),
+          OutlinedButton.icon(
+            onPressed: _openContribute,
+            icon: const Icon(Icons.open_in_browser),
+            label: const Text('Contribute to Open Food Facts'),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () => setState(() => _showForm = true),
+            icon: const Icon(Icons.edit),
+            label: const Text('Enter manually'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildForm() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(
+          'Barcode: ${widget.barcode}',
+          style: const TextStyle(color: AppColors.subtle, fontSize: 12),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _nameCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Product name *'),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _kcalCtrl,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(
+            labelText: 'kcal per 100 g',
+            suffixText: 'kcal',
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 20),
+        const Text('How much did you have?',
+            style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.search_off, size: 64, color: AppColors.subtle),
-            const SizedBox(height: 16),
-            Text(
-              isTimeout
-                  ? 'Could not reach product database.'
-                  : 'No product found for barcode $barcode.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.subtle),
+            IconButton(
+              onPressed: () => _stepAmount(-10),
+              icon: const Icon(Icons.remove_circle_outline),
+              color: AppColors.primary,
             ),
-            const SizedBox(height: 24),
-            OutlinedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Contribute at openfoodfacts.org/product/$barcode'),
-                    duration: const Duration(seconds: 5),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.open_in_browser),
-              label: const Text('Contribute to Open Food Facts'),
+            SizedBox(
+              width: 90,
+              child: TextField(
+                controller: _amountCtrl,
+                textAlign: TextAlign.center,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(suffixText: 'g'),
+                onChanged: (v) =>
+                    setState(() => _amount = double.tryParse(v) ?? _amount),
+              ),
             ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: () => context.pushReplacement('/barcode-result-manual',
-                  extra: barcode),
-              icon: const Icon(Icons.edit),
-              label: const Text('Enter manually'),
+            IconButton(
+              onPressed: () => _stepAmount(10),
+              icon: const Icon(Icons.add_circle_outline),
+              color: AppColors.primary,
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 8),
+        Center(
+          child: Text(
+            'Total: ${_totalKcal.round()} kcal',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppColors.accent,
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _MealTypeChips(
+          current: _mealType,
+          onChanged: (t) => setState(() => _mealType = t),
+        ),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: _saving ? null : _logManual,
+          icon: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2),
+                )
+              : const Icon(Icons.check),
+          label: const Text('Log this meal'),
+        ),
+      ],
     );
   }
 }

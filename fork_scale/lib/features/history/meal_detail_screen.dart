@@ -60,7 +60,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
       );
 
       if (!mounted) return;
-      context.push(
+      await context.push(
         '/results',
         extra: AnalysisResult(
           utensilDetected: result.utensilDetected,
@@ -95,7 +95,12 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _analyzing = false);
+      if (mounted) {
+        setState(() => _analyzing = false);
+        // Refresh meal data — covers both the "saved" path (pending→analyzed)
+        // and the "back without saving" path (re-fetches same pending meal).
+        ref.invalidate(_mealProvider(widget.mealId));
+      }
     }
   }
 
@@ -103,7 +108,8 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     final repo = ref.read(mealsRepositoryProvider);
     final newId = await repo.copyMealToToday(original);
     if (!mounted) return;
-    context.go('/history/$newId');
+    context.go('/history');
+    context.push('/history/$newId');
   }
 
   @override
@@ -117,6 +123,15 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
           if (meal != null && !meal.pending) ...[
+            if (meal.source == 'camera')
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Edit meal',
+                onPressed: () async {
+                  await context.push('/history/${widget.mealId}/edit');
+                  if (mounted) ref.invalidate(_mealProvider(widget.mealId));
+                },
+              ),
             IconButton(
               tooltip: meal.starred ? 'Unstar' : 'Star',
               icon: Icon(meal.starred ? Icons.star : Icons.star_border),

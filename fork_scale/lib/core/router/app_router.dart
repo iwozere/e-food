@@ -8,14 +8,22 @@ import '../../features/barcode/barcode_scanner_screen.dart';
 import '../../features/capture/capture_screen.dart';
 import '../../features/history/history_screen.dart';
 import '../../features/history/meal_detail_screen.dart';
+import '../../features/history/meal_edit_screen.dart';
 import '../../features/recipes/recipe_detail_screen.dart';
 import '../../features/recipes/recipe_editor_screen.dart';
 import '../../features/recipes/recipes_screen.dart';
 import '../../features/results/results_screen.dart';
 import '../../features/settings/settings_screen.dart';
 import '../../models/analysis_result.dart';
+import '../../models/meal.dart';
 import '../../models/recipe.dart';
 import '../theme/app_theme.dart';
+
+// Scoped provider used by _MealEditLoader; family keeps it per-id.
+final _editMealProvider =
+    FutureProvider.autoDispose.family<Meal?, int>((ref, id) {
+  return ref.read(mealsRepositoryProvider).getMeal(id);
+});
 
 // Scoped provider used by _RecipeEditorLoader; family keeps it per-id.
 final _editRecipeProvider =
@@ -44,6 +52,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final barcode = state.extra as String;
           return BarcodeResultScreen(barcode: barcode);
+        },
+      ),
+      GoRoute(
+        path: '/history/:id/edit',
+        builder: (context, state) {
+          final id = int.parse(state.pathParameters['id']!);
+          return _MealEditLoader(mealId: id);
         },
       ),
       GoRoute(
@@ -167,6 +182,26 @@ class _ScaffoldWithNav extends StatelessWidget {
         label: 'Settings',
       ),
     ];
+  }
+}
+
+// ── Loader for meal edit route ────────────────────────────────────────────────
+
+class _MealEditLoader extends ConsumerWidget {
+  final int mealId;
+  const _MealEditLoader({required this.mealId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mealAsync = ref.watch(_editMealProvider(mealId));
+    return mealAsync.when(
+      loading: () =>
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
+      error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
+      data: (meal) => meal == null
+          ? const Scaffold(body: Center(child: Text('Meal not found')))
+          : MealEditScreen(meal: meal),
+    );
   }
 }
 
