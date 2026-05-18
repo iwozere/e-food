@@ -6,7 +6,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../core/theme/app_theme.dart';
 
 class BarcodeScannerScreen extends StatefulWidget {
-  const BarcodeScannerScreen({super.key});
+  final bool forRecipe;
+  const BarcodeScannerScreen({super.key, this.forRecipe = false});
 
   @override
   State<BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
@@ -39,7 +40,18 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     _handled = true;
     HapticFeedback.mediumImpact();
     _controller.stop();
-    context.pushReplacement('/barcode-result', extra: raw);
+    _navigateToResult(raw);
+  }
+
+  // Push (not pushReplacement) so the result can be forwarded back to whoever
+  // pushed /scan. pushReplacement would complete the /scan future with null
+  // immediately, breaking the forRecipe result-passing chain.
+  Future<void> _navigateToResult(String barcode) async {
+    final result = await context.push<Map<String, dynamic>?>(
+      '/barcode-result',
+      extra: {'barcode': barcode, 'forRecipe': widget.forRecipe},
+    );
+    if (mounted) context.pop(result);
   }
 
   @override

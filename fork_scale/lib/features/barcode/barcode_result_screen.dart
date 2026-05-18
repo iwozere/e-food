@@ -14,7 +14,8 @@ import '../../models/meal_item.dart';
 
 class BarcodeResultScreen extends ConsumerStatefulWidget {
   final String barcode;
-  const BarcodeResultScreen({super.key, required this.barcode});
+  final bool forRecipe;
+  const BarcodeResultScreen({super.key, required this.barcode, this.forRecipe = false});
 
   @override
   ConsumerState<BarcodeResultScreen> createState() =>
@@ -141,7 +142,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
     }
 
     if (_errorMsg != null) {
-      return _NotFoundScreen(barcode: widget.barcode, isTimeout: _errorMsg == 'service_error');
+      return _NotFoundScreen(barcode: widget.barcode, isTimeout: _errorMsg == 'service_error', forRecipe: widget.forRecipe);
     }
 
     final p = _product!;
@@ -259,12 +260,24 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
             ),
             const SizedBox(width: 12),
             OutlinedButton.icon(
-              onPressed: () => context.push('/recipes/new', extra: {
-                'prefillName': _nameCtrl.text,
-                'prefillKcal': double.tryParse(_kcalCtrl.text) ?? p.kcalPer100g,
-                'prefillAmount': _amount,
-                'prefillBarcode': widget.barcode,
-              }),
+              onPressed: () {
+                final kcalPer100 = double.tryParse(_kcalCtrl.text) ?? p.kcalPer100g;
+                if (widget.forRecipe) {
+                  context.pop(<String, dynamic>{
+                    'name': _nameCtrl.text.trim(),
+                    'kcalPer100g': kcalPer100,
+                    'weightG': _amount,
+                    'barcode': widget.barcode,
+                  });
+                } else {
+                  context.push('/recipes/new', extra: {
+                    'prefillName': _nameCtrl.text,
+                    'prefillKcal': kcalPer100,
+                    'prefillAmount': _amount,
+                    'prefillBarcode': widget.barcode,
+                  });
+                }
+              },
               icon: const Icon(Icons.menu_book),
               label: const Text('Add to recipe'),
             ),
@@ -367,7 +380,8 @@ class _MealTypeChips extends StatelessWidget {
 class _NotFoundScreen extends ConsumerStatefulWidget {
   final String barcode;
   final bool isTimeout;
-  const _NotFoundScreen({required this.barcode, required this.isTimeout});
+  final bool forRecipe;
+  const _NotFoundScreen({required this.barcode, required this.isTimeout, this.forRecipe = false});
 
   @override
   ConsumerState<_NotFoundScreen> createState() => _NotFoundScreenState();
@@ -410,6 +424,23 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
     setState(() {
       _amount = v;
       _amountCtrl.text = v.toStringAsFixed(0);
+    });
+  }
+
+  void _addToRecipe() {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product name is required')),
+      );
+      return;
+    }
+    final kcal = double.tryParse(_kcalCtrl.text) ?? 0;
+    context.pop(<String, dynamic>{
+      'name': name,
+      'kcalPer100g': kcal,
+      'weightG': _amount,
+      'barcode': widget.barcode,
     });
   }
 
@@ -564,24 +595,33 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        _MealTypeChips(
-          current: _mealType,
-          onChanged: (t) => setState(() => _mealType = t),
-        ),
+        if (!widget.forRecipe) ...[
+          const SizedBox(height: 16),
+          _MealTypeChips(
+            current: _mealType,
+            onChanged: (t) => setState(() => _mealType = t),
+          ),
+        ],
         const SizedBox(height: 24),
-        FilledButton.icon(
-          onPressed: _saving ? null : _logManual,
-          icon: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2),
-                )
-              : const Icon(Icons.check),
-          label: const Text('Log this meal'),
-        ),
+        if (widget.forRecipe)
+          FilledButton.icon(
+            onPressed: _addToRecipe,
+            icon: const Icon(Icons.menu_book),
+            label: const Text('Add to recipe'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: _saving ? null : _logManual,
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2),
+                  )
+                : const Icon(Icons.check),
+            label: const Text('Log this meal'),
+          ),
       ],
     );
   }

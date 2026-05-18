@@ -154,13 +154,14 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
     }
   }
 
-  void _addIngredient({String? name, double? kcalPer100g, String? source, String? barcode}) {
+  void _addIngredient({String? name, double? kcalPer100g, double? weightG, String? source, String? barcode}) {
+    final w = weightG ?? 100.0;
     setState(() {
       _items.add(RecipeItem(
         name: name ?? '',
-        weightG: 100,
+        weightG: w,
         kcalPer100g: kcalPer100g ?? 0,
-        totalKcal: (kcalPer100g ?? 0),
+        totalKcal: w / 100 * (kcalPer100g ?? 0),
         source: source ?? 'manual',
         barcode: barcode,
       ));
@@ -284,8 +285,16 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
         },
         onScanBarcode: () {
           Navigator.pop(context);
-          context.push('/scan').then((_) {
-            // If returned with a barcode product, handled via redirect in router
+          context.push<Map<String, dynamic>?>('/scan', extra: {'forRecipe': true}).then((result) {
+            if (result != null && mounted) {
+              _addIngredient(
+                name: result['name'] as String?,
+                kcalPer100g: result['kcalPer100g'] as double?,
+                weightG: result['weightG'] as double?,
+                source: 'off',
+                barcode: result['barcode'] as String?,
+              );
+            }
           });
         },
         onManual: () {

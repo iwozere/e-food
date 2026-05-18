@@ -45,13 +45,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/scan',
-        builder: (_, _) => const BarcodeScannerScreen(),
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          final forRecipe = extra?['forRecipe'] as bool? ?? false;
+          return BarcodeScannerScreen(forRecipe: forRecipe);
+        },
       ),
       GoRoute(
         path: '/barcode-result',
         builder: (context, state) {
-          final barcode = state.extra as String;
-          return BarcodeResultScreen(barcode: barcode);
+          final extra = state.extra as Map<String, dynamic>;
+          final barcode = extra['barcode'] as String;
+          final forRecipe = extra['forRecipe'] as bool? ?? false;
+          return BarcodeResultScreen(barcode: barcode, forRecipe: forRecipe);
         },
       ),
       GoRoute(

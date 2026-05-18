@@ -2,6 +2,40 @@
 
 ---
 
+## 2026-05-18 — History list and daily chart not updated after editing a meal
+
+**Description:**
+After tapping a meal in History, opening the edit screen, changing weight or calories, and saving, the Meal Detail screen correctly reflected the new values. However, the History list tile still showed the old calorie count, and the day summary bar and weekly bar chart were also unchanged.
+
+**Root cause:**
+`_MealTile.onTap` called `context.push('/history/${meal.id}')` without `await`, so control never returned to `HistoryScreen` in a way that triggered any refresh. The three providers that drive the History screen — `_mealsProvider` (the list), `_dayTotalProvider` (the day banner), and `_weeklyKcalProvider` (the chart) — were never invalidated after returning from the detail/edit flow. The `onRefresh` callback passed to `_MealList` also only invalidated `_mealsProvider`, leaving the other two stale regardless.
+
+**Solution:**
+- In `_MealTile.build`, changed `onTap` from `() => context.push(...)` to an async lambda that `await`s the push and then calls `onRefresh()` when the screen returns.
+- In `HistoryScreen`, expanded the `onRefresh` callback passed to `_MealList` to invalidate all three providers: `_mealsProvider`, `_dayTotalProvider`, and `_weeklyKcalProvider`.
+
+---
+
+---
+
+## 2026-05-18 — Recipe detail: no visible way to edit ingredients; edits appear lost on return
+
+**Description:**
+Opening a recipe from the Recipes tab showed the ingredients as completely read-only list items with no affordance to add, delete, or change any values (name, weight, kcal/100g). The only edit entry point was a small pencil icon in the AppBar, which was easy to miss. Additionally, even when the user did find the AppBar icon and made changes in the Recipe Editor, returning to the detail screen showed the old recipe — making edits appear to have had no effect.
+
+**Root cause:**
+Two independent issues:
+
+1. **Stale data on return**: `context.push('/recipes/$recipeId/edit')` in the AppBar action was not awaited and never called `ref.invalidate(_recipeProvider(recipeId))`. Because `_recipeProvider` is `FutureProvider.autoDispose.family` and the detail screen stayed alive during the edit, it retained its cached pre-edit value and never re-fetched.
+
+2. **Discoverability**: `_RecipeDetail` rendered ingredients as plain read-only `ListTile`s. The only edit entry point was a small icon in the AppBar with no corresponding affordance in the scrollable body.
+
+**Solution:**
+- In `RecipeDetailScreen`, changed the AppBar edit button `onPressed` to `await context.push(...)` followed by `ref.invalidate(_recipeProvider(recipeId))`, so the provider re-fetches fresh data when the editor is dismissed.
+- Added `onEdit` callback to `_RecipeDetail` and placed a prominent **"Edit recipe"** `OutlinedButton` alongside the existing "Log a portion" button at the bottom of the detail body — same callback, so both the AppBar icon and the body button invalidate the provider on return.
+
+---
+
 ## 2026-05-18 — "Contribute to Open Food Facts" does nothing; "Enter manually" crashes
 
 **Description:**
@@ -60,6 +94,44 @@ Creating a new recipe via "New recipe" → filling in photo, title, yield → ta
 
 **Solution:**
 In `recipes_screen.dart`, changed all `context.push('/recipes/new')` and `context.push('/recipes/:id/edit')` call sites to `await` the navigation and then call `ref.invalidate(_recipesProvider)` on return. Also passed a `onNewRecipe` callback down to `_EmptyState` so the same invalidation fires from the empty-state button. The edit action in `_RecipeCard._showContextMenu` was updated similarly (was missing `onRefresh()` entirely).
+
+---
+
+## 2026-05-18 — Barcode scan from recipe editor: scanned ingredient never added (result lost)
+
+**Description:**
+Opening a new or existing recipe, tapping "Add item" → "Scan barcode", scanning a product, adjusting the amount, and tapping "Add to recipe" had no effect — the ingredient did not appear in the recipe editor.
+
+**Root cause:**
+`RecipeEditorScreen` calls `context.push<Map?>('/scan', extra: {'forRecipe': true}).then((result) { _addIngredient(...) })`. It correctly waits for the `/scan` push to complete with ingredient data. However, `BarcodeScannerScreen._onDetect` forwarded to the result screen via `context.pushReplacement('/barcode-result', ...)`. `pushReplacement` removes `/scan` from the navigation stack immediately, which causes go_router to complete the `push('/scan')` Future with `null` right away. The `.then(result)` callback ran with `result == null`, so `_addIngredient` was never called. Later, when `BarcodeResultScreen` called `context.pop(data)`, there was no pending `push` listener to receive that data.
+
+**Solution:**
+Replaced the `context.pushReplacement` call in `BarcodeScannerScreen._onDetect` with a new async method `_navigateToResult` that uses `context.push('/barcode-result', ...)` and then calls `context.pop(result)` to forward the return value back to the original `/scan` push. This keeps `/scan` alive in the stack while the result screen is shown, so when the result screen pops with ingredient data, the scanner receives it and propagates it back to `RecipeEditorScreen`.
+
+---
+
+## 2026-05-18 — Barcode scan from recipe editor adds ingredient to new recipe instead of the one being edited
+
+**Description:**
+When editing an existing recipe, tapping "Add item" → "Scan barcode", scanning a product, adjusting the amount, and tapping "Add to recipe" did not add the ingredient to the open recipe. Instead, it opened a brand-new recipe editor pre-filled with the scanned product — discarding all context of the recipe being edited.
+
+**Root cause:**
+Three independent gaps in the navigation chain:
+
+1. `RecipeEditorScreen._showAddIngredientSheet` called `context.push('/scan')` without passing any context and ignored the return value (`.then((_) { })` was a no-op). There was no way for the scan flow to communicate back to the editor.
+
+2. `BarcodeScannerScreen` always called `context.pushReplacement('/barcode-result', extra: raw)` with a plain String, with no flag to indicate the caller's intent.
+
+3. `BarcodeResultScreen`'s "Add to recipe" button always navigated to `/recipes/new`, regardless of how the screen was reached.
+
+**Solution:**
+Threaded a `forRecipe` boolean through the entire navigation chain:
+
+- `RecipeEditorScreen.onScanBarcode`: changed from a no-op `.then()` to `context.push<Map<String,dynamic>?>('/scan', extra: {'forRecipe': true}).then((result) { _addIngredient(...) })`. Also extended `_addIngredient` to accept an optional `weightG` parameter so the scanned amount is preserved.
+- `BarcodeScannerScreen`: added `final bool forRecipe` parameter; forwards it in `pushReplacement('/barcode-result', extra: {'barcode': raw, 'forRecipe': forRecipe})`.
+- `BarcodeResultScreen`: added `final bool forRecipe` parameter; "Add to recipe" now calls `context.pop({'name', 'kcalPer100g', 'weightG', 'barcode'})` when `forRecipe` is true, otherwise navigates to `/recipes/new` as before.
+- `_NotFoundScreen`: same `forRecipe` flag; the manual-entry form shows "Add to recipe" (pops with ingredient data) instead of "Log this meal" when `forRecipe` is true.
+- `app_router.dart`: updated `/scan` and `/barcode-result` builders to parse `extra` as `Map<String, dynamic>` and pass `forRecipe` to the respective widgets.
 
 ---
 

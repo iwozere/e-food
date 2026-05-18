@@ -30,7 +30,10 @@ class RecipeDetailScreen extends ConsumerWidget {
           if (recipeAsync.valueOrNull != null)
             IconButton(
               icon: const Icon(Icons.edit_outlined),
-              onPressed: () => context.push('/recipes/$recipeId/edit'),
+              onPressed: () async {
+                await context.push('/recipes/$recipeId/edit');
+                ref.invalidate(_recipeProvider(recipeId));
+              },
               tooltip: 'Edit recipe',
             ),
         ],
@@ -43,6 +46,10 @@ class RecipeDetailScreen extends ConsumerWidget {
             : _RecipeDetail(
                 recipe: recipe,
                 onLogPortion: () => _showLogSheet(context, recipe),
+                onEdit: () async {
+                  await context.push('/recipes/$recipeId/edit');
+                  ref.invalidate(_recipeProvider(recipeId));
+                },
               ),
       ),
     );
@@ -63,7 +70,12 @@ class RecipeDetailScreen extends ConsumerWidget {
 class _RecipeDetail extends StatelessWidget {
   final Recipe recipe;
   final VoidCallback onLogPortion;
-  const _RecipeDetail({required this.recipe, required this.onLogPortion});
+  final VoidCallback onEdit;
+  const _RecipeDetail({
+    required this.recipe,
+    required this.onLogPortion,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -127,10 +139,24 @@ class _RecipeDetail extends StatelessWidget {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: FilledButton.icon(
-              onPressed: onLogPortion,
-              icon: const Icon(Icons.restaurant),
-              label: const Text('Log a portion'),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: onLogPortion,
+                    icon: const Icon(Icons.restaurant),
+                    label: const Text('Log a portion'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Edit recipe'),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

@@ -144,7 +144,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   ? const _EmptyState()
                   : _MealList(
                       meals: meals,
-                      onRefresh: () => ref.invalidate(_mealsProvider),
+                      onRefresh: () {
+                        ref.invalidate(_mealsProvider);
+                        ref.invalidate(_dayTotalProvider);
+                        ref.invalidate(_weeklyKcalProvider);
+                      },
                     ),
             ),
           ),
@@ -400,7 +404,10 @@ class _MealTile extends ConsumerWidget {
       child: GestureDetector(
         onLongPress: () => _showContextMenu(context, ref),
         child: ListTile(
-          onTap: () => context.push('/history/${meal.id}'),
+          onTap: () async {
+                await context.push('/history/${meal.id}');
+                if (context.mounted) onRefresh();
+              },
           leading: _Thumbnail(path: meal.photoPath, source: meal.source),
           title: Text(
             meal.pending
