@@ -8,7 +8,10 @@
       "WebFetch(domain:naehrwertdaten.ch)",
       "Bash(python tool/build_sfcd.py)",
       "Bash(Remove-Item \"C:/dev/cursor/e-food/fork_scale/tool/_sfcd_cache.xlsx\" -ErrorAction SilentlyContinue)",
-      "Bash(Write-Host \"Cache removed\")"
+      "Bash(Write-Host \"Cache removed\")",
+      "Bash(git -C \"C:\\\\dev\\\\cursor\\\\e-food\" log --oneline --all --grep=\"barcode\\\\|edit\\\\|CR-03\")",
+      "Bash(git *)",
+      "Bash(Get-ChildItem *)"
     ]
   }
 }

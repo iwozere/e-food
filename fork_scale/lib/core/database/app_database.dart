@@ -176,6 +176,13 @@ class AppDatabase {
     }
   }
 
+  static Future<void> closeAll() async {
+    await _meals?.close();
+    _meals = null;
+    await _usda?.close();
+    _usda = null;
+  }
+
   static Future<Database> _openUsdaDb() async {
     final dir = await getApplicationDocumentsDirectory();
     final dest = p.join(dir.path, 'usda_nutrition.db');

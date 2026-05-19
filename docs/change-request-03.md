@@ -669,7 +669,7 @@ History Screen (additions)
 
 | Item | Status | Notes |
 |---|---|---|
-| CR-03-A | pending | — |
+| CR-03-A | **complete** | Barcode scanner + Open Food Facts + BarcodeMealBuilderScreen implemented |
 | CR-03-B | **complete** | Recipe builder fully implemented as of 2026-05-16 |
 | CR-03-C | **complete** | Copy-meal action implemented as of 2026-05-16 |
-| CR-03-D | pending | Raised 2026-05-18; no schema change needed |
+| CR-03-D | **complete** | MealEditScreen implemented; edit available for camera + barcode meals |

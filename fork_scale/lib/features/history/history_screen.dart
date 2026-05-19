@@ -340,11 +340,29 @@ class _MealList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Assign a monotonically increasing group index each time the date changes.
+    // Meals are ordered newest-first, so group 0 = most recent date.
+    final groupOf = <int, int>{};
+    int group = -1;
+    String? lastKey;
+    for (final meal in meals) {
+      final dt = meal.createdAt;
+      final key = '${dt.year}-${dt.month}-${dt.day}';
+      if (key != lastKey) {
+        group++;
+        lastKey = key;
+      }
+      groupOf[meal.id!] = group;
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.only(top: 8, bottom: 80),
       itemCount: meals.length,
-      itemBuilder: (context, i) =>
-          _MealTile(meal: meals[i], onRefresh: onRefresh),
+      itemBuilder: (context, i) => _MealTile(
+        meal: meals[i],
+        onRefresh: onRefresh,
+        dateGroupIndex: groupOf[meals[i].id!]!,
+      ),
     );
   }
 }
@@ -352,7 +370,12 @@ class _MealList extends StatelessWidget {
 class _MealTile extends ConsumerWidget {
   final Meal meal;
   final VoidCallback onRefresh;
-  const _MealTile({required this.meal, required this.onRefresh});
+  final int dateGroupIndex;
+  const _MealTile({
+    required this.meal,
+    required this.onRefresh,
+    required this.dateGroupIndex,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -397,6 +420,9 @@ class _MealTile extends ConsumerWidget {
       child: GestureDetector(
         onLongPress: () => _showContextMenu(context, ref),
         child: ListTile(
+          tileColor: dateGroupIndex.isEven
+              ? AppColors.background
+              : AppColors.surface,
           onTap: () async {
                 await context.push('/history/${meal.id}');
                 if (context.mounted) onRefresh();

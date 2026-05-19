@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/services/backup_service.dart';
+
 import 'package:flutter/services.dart';
 
 import '../../core/services/gemini_service.dart';
@@ -164,6 +166,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   String _mb(int bytes) => '${(bytes / 1048576).toStringAsFixed(1)} MB';
+
+  Future<void> _createBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await BackupService.createBackup();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Backup failed: $e')));
+    }
+  }
+
+  Future<void> _restoreBackup() async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Restore backup?'),
+        content: const Text(
+          'This will replace all current data with the backup. '
+          'You will need to restart the app afterwards.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final restored = await BackupService.restoreBackup();
+      if (!mounted) return;
+      if (restored) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Backup restored. Please restart the app.'),
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Restore failed: $e')));
+    }
+  }
 
   Future<void> _exportCsv() async {
     final messenger = ScaffoldMessenger.of(context);
@@ -370,6 +421,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     onPressed: _exportCsv,
                     icon: const Icon(Icons.ios_share),
                     label: const Text('Export to CSV'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _createBackup,
+                    icon: const Icon(Icons.backup_outlined),
+                    label: const Text('Create backup'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _restoreBackup,
+                    icon: const Icon(Icons.restore_outlined),
+                    label: const Text('Restore from backup'),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
