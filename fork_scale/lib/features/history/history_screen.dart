@@ -8,31 +8,7 @@ import 'package:intl/intl.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/meal.dart';
-
-typedef _MealsFilter = ({String? query, DateTime? day, bool starredOnly});
-
-final _mealsProvider =
-    FutureProvider.autoDispose.family<List<Meal>, _MealsFilter>(
-  (ref, filter) {
-    final day = filter.day;
-    return ref.read(mealsRepositoryProvider).getMeals(
-          searchQuery: filter.query,
-          from: day != null ? DateTime(day.year, day.month, day.day) : null,
-          to: day != null
-              ? DateTime(day.year, day.month, day.day, 23, 59, 59)
-              : null,
-          starredOnly: filter.starredOnly,
-        );
-  },
-);
-
-final _dayTotalProvider = FutureProvider.autoDispose<double>((ref) {
-  return ref.read(mealsRepositoryProvider).getDayTotalKcal(DateTime.now());
-});
-
-final _weeklyKcalProvider = FutureProvider.autoDispose<List<double>>((ref) {
-  return ref.read(mealsRepositoryProvider).getWeeklyKcal();
-});
+import 'history_providers.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -46,6 +22,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   String? _query;
   DateTime? _selectedDay;
   bool _showStarredOnly = false;
+  String? _mealType;
 
   @override
   void dispose() {
@@ -66,10 +43,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       query: _query,
       day: _selectedDay,
       starredOnly: _showStarredOnly,
+      mealType: _mealType,
     );
-    final mealsAsync = ref.watch(_mealsProvider(filter));
-    final dayTotalAsync = ref.watch(_dayTotalProvider);
-    final weeklyAsync = ref.watch(_weeklyKcalProvider);
+    final mealsAsync = ref.watch(historyMealsProvider(filter));
+    final dayTotalAsync = ref.watch(historyDayTotalProvider);
+    final weeklyAsync = ref.watch(historyWeeklyKcalProvider);
     final goal =
         (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
 
@@ -95,33 +73,48 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Row(
-              children: [
-                FilterChip(
-                  label: const Text('Starred'),
-                  avatar: Icon(
-                    _showStarredOnly ? Icons.star : Icons.star_border,
-                    size: 16,
-                    color: _showStarredOnly ? AppColors.accent : null,
-                  ),
-                  selected: _showStarredOnly,
-                  onSelected: (v) => setState(() => _showStarredOnly = v),
-                  selectedColor: AppColors.accent.withValues(alpha: 0.15),
-                  checkmarkColor: AppColors.accent,
-                  showCheckmark: false,
-                ),
-                if (_selectedDay != null) ...[
-                  const SizedBox(width: 8),
-                  Chip(
-                    label: Text(
-                      DateFormat('EEE, MMM d').format(_selectedDay!),
-                      style: const TextStyle(fontSize: 12),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  FilterChip(
+                    label: const Text('Starred'),
+                    avatar: Icon(
+                      _showStarredOnly ? Icons.star : Icons.star_border,
+                      size: 16,
+                      color: _showStarredOnly ? AppColors.accent : null,
                     ),
-                    deleteIcon: const Icon(Icons.close, size: 14),
-                    onDeleted: () => setState(() => _selectedDay = null),
+                    selected: _showStarredOnly,
+                    onSelected: (v) => setState(() => _showStarredOnly = v),
+                    selectedColor: AppColors.accent.withValues(alpha: 0.15),
+                    checkmarkColor: AppColors.accent,
+                    showCheckmark: false,
                   ),
+                  for (final type in ['breakfast', 'lunch', 'dinner', 'snack']) ...[
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: Text(_mealTypeLabel(type)),
+                      selected: _mealType == type,
+                      onSelected: (v) =>
+                          setState(() => _mealType = v ? type : null),
+                      selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                      checkmarkColor: AppColors.primary,
+                      showCheckmark: false,
+                    ),
+                  ],
+                  if (_selectedDay != null) ...[
+                    const SizedBox(width: 8),
+                    Chip(
+                      label: Text(
+                        DateFormat('EEE, MMM d').format(_selectedDay!),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      deleteIcon: const Icon(Icons.close, size: 14),
+                      onDeleted: () => setState(() => _selectedDay = null),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
           Padding(
@@ -145,9 +138,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   : _MealList(
                       meals: meals,
                       onRefresh: () {
-                        ref.invalidate(_mealsProvider);
-                        ref.invalidate(_dayTotalProvider);
-                        ref.invalidate(_weeklyKcalProvider);
+                        ref.invalidate(historyMealsProvider);
+                        ref.invalidate(historyDayTotalProvider);
+                        ref.invalidate(historyWeeklyKcalProvider);
                       },
                     ),
             ),
@@ -432,7 +425,7 @@ class _MealTile extends ConsumerWidget {
                         await ref
                             .read(mealsRepositoryProvider)
                             .starMeal(meal.id!, starred: !meal.starred);
-                        ref.invalidate(_mealsProvider);
+                        ref.invalidate(historyMealsProvider);
                       },
                       child: Icon(
                         meal.starred ? Icons.star : Icons.star_border,
@@ -482,7 +475,7 @@ class _MealTile extends ConsumerWidget {
     if (!context.mounted) return;
     if (action == 'copy') {
       final newId = await ref.read(mealsRepositoryProvider).copyMealToToday(meal);
-      ref.invalidate(_mealsProvider);
+      ref.invalidate(historyMealsProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

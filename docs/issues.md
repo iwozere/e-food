@@ -2,6 +2,34 @@
 
 ---
 
+## 2026-05-19 — Recipe portion not appearing in History after "Log meal"
+
+**Description:**
+After opening a recipe, tapping "Log a portion", adjusting the portion size, and tapping "Log meal", the app navigated to the History tab but the newly logged meal was absent from the list. The day summary bar and weekly chart also showed no change. The meal was correctly saved to the database — it appeared after an app restart.
+
+**Root cause:**
+`StatefulShellRoute.indexedStack` keeps all branch widgets mounted at all times. `HistoryScreen` was already alive and its three `FutureProvider.autoDispose` providers (`historyMealsProvider`, `historyDayTotalProvider`, `historyWeeklyKcalProvider`) held cached stale data. `LogPortionSheet._log()` called `Navigator.pop(context)` to close the sheet and then `context.go('/history')` to switch tabs — but the shell simply made the History tab visible without triggering any widget rebuild or provider invalidation, so the cached (pre-logging) data was displayed.
+
+**Solution:**
+In `LogPortionSheet._log()`, added `ref.invalidate` calls for all three history providers immediately after `insertMeal` and before `Navigator.pop` / `context.go('/history')`. Added `import '../history/history_providers.dart'` to access the public providers.
+
+---
+
+## 2026-05-19 — Barcode meal not appearing in History after "Log this meal"
+
+**Description:**
+After scanning a barcode, editing the amount or calories, and tapping "Log this meal", the app navigated to the History tab but the newly logged meal was absent from the list. The day summary bar and weekly chart also showed no change.
+
+**Root cause:**
+`StatefulShellRoute.indexedStack` keeps all branch widgets mounted at all times. `HistoryScreen` was already alive and its three `FutureProvider.autoDispose` providers (`_mealsProvider`, `_dayTotalProvider`, `_weeklyKcalProvider`) held cached stale data. When `BarcodeResultScreen._logMeal()` called `context.go('/history')`, the shell simply made the History tab visible — no widget rebuild occurred, no provider was invalidated, so the cached (pre-logging) data was displayed. The same bug existed in `_NotFoundScreen._logManual()` (the manual-entry fallback path).
+
+**Solution:**
+Extracted the three private history providers and their `MealsFilter` typedef into a new shared file `lib/features/history/history_providers.dart` (as public `historyMealsProvider`, `historyDayTotalProvider`, `historyWeeklyKcalProvider`). Updated `history_screen.dart` to import from this file. In `BarcodeResultScreen._logMeal()` and `_NotFoundScreen._logManual()`, added `ref.invalidate` calls for all three providers immediately after `insertMeal` and before `context.go('/history')`, so the History tab re-fetches fresh data as soon as it becomes visible.
+
+---
+
+---
+
 ## 2026-05-18 — History list and daily chart not updated after editing a meal
 
 **Description:**

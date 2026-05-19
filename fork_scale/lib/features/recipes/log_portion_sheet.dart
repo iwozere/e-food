@@ -7,6 +7,7 @@ import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/meal.dart';
 import '../../models/recipe.dart';
+import '../history/history_providers.dart';
 
 class LogPortionSheet extends ConsumerStatefulWidget {
   final Recipe recipe;
@@ -66,6 +67,9 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
       );
       await ref.read(mealsRepositoryProvider).insertMeal(meal);
       if (!mounted) return;
+      ref.invalidate(historyMealsProvider);
+      ref.invalidate(historyDayTotalProvider);
+      ref.invalidate(historyWeeklyKcalProvider);
       Navigator.pop(context);
       context.go('/history');
     } finally {

@@ -131,6 +131,7 @@ class MealsRepository {
     double? minKcal,
     double? maxKcal,
     bool starredOnly = false,
+    String? mealType,
     int limit = 50,
     int offset = 0,
   }) async {
@@ -160,6 +161,10 @@ class MealsRepository {
     }
     if (starredOnly) {
       where.add('starred = 1');
+    }
+    if (mealType != null) {
+      where.add('meal_type = ?');
+      args.add(mealType);
     }
 
     final rows = await db.query(
@@ -299,6 +304,96 @@ class MealsRepository {
     final file = File('${dir.path}/forkscale_$stamp.csv');
     await file.writeAsString(buf.toString());
     return file.path;
+  }
+
+  Future<double> getAvgDailyKcal({int days = 30}) async {
+    final db = await AppDatabase.mealsDb;
+    final cutoff =
+        DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+    final result = await db.rawQuery(
+      "SELECT AVG(daily_total) as avg FROM ("
+      "  SELECT SUM(total_kcal) as daily_total FROM meals"
+      "  WHERE created_at >= ? AND pending = 0"
+      "  GROUP BY strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch'))"
+      ")",
+      [cutoff],
+    );
+    return (result.first['avg'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  Future<List<({String name, int count, double avgKcal})>> getTopMeals(
+      {int limit = 5}) async {
+    final db = await AppDatabase.mealsDb;
+    final rows = await db.rawQuery(
+      "SELECT name, COUNT(*) as cnt, AVG(total_kcal) as avg_kcal "
+      "FROM meals "
+      "WHERE pending = 0 AND name IS NOT NULL AND name != '' "
+      "GROUP BY name ORDER BY cnt DESC LIMIT ?",
+      [limit],
+    );
+    return rows
+        .map((r) => (
+              name: r['name'] as String,
+              count: r['cnt'] as int,
+              avgKcal: (r['avg_kcal'] as num).toDouble(),
+            ))
+        .toList();
+  }
+
+  Future<int> getCurrentStreak() async {
+    final db = await AppDatabase.mealsDb;
+    final rows = await db.rawQuery(
+      "SELECT DISTINCT strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch')) as day "
+      "FROM meals WHERE pending = 0 ORDER BY day DESC LIMIT 365",
+    );
+    if (rows.isEmpty) return 0;
+
+    final loggedDays = rows.map((r) => r['day'] as String).toSet();
+    final today = DateTime.now();
+    String fmt(DateTime d) =>
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+    DateTime start = DateTime(today.year, today.month, today.day);
+    if (!loggedDays.contains(fmt(start))) {
+      start = start.subtract(const Duration(days: 1));
+      if (!loggedDays.contains(fmt(start))) return 0;
+    }
+
+    int streak = 0;
+    DateTime current = start;
+    while (streak < 365 && loggedDays.contains(fmt(current))) {
+      streak++;
+      current = current.subtract(const Duration(days: 1));
+    }
+    return streak;
+  }
+
+  Future<int> getDaysOverGoal({required double goalKcal, int days = 7}) async {
+    final db = await AppDatabase.mealsDb;
+    final cutoff =
+        DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+    final result = await db.rawQuery(
+      "SELECT COUNT(*) as cnt FROM ("
+      "  SELECT SUM(total_kcal) as daily_total FROM meals"
+      "  WHERE created_at >= ? AND pending = 0"
+      "  GROUP BY strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch'))"
+      "  HAVING daily_total > ?"
+      ")",
+      [cutoff, goalKcal],
+    );
+    return (result.first['cnt'] as int?) ?? 0;
+  }
+
+  Future<int> getDaysWithMeals({int days = 7}) async {
+    final db = await AppDatabase.mealsDb;
+    final cutoff =
+        DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+    final result = await db.rawQuery(
+      "SELECT COUNT(DISTINCT strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch'))) as cnt "
+      "FROM meals WHERE created_at >= ? AND pending = 0",
+      [cutoff],
+    );
+    return (result.first['cnt'] as int?) ?? 0;
   }
 
   Future<List<MealItem>> _getItems(int mealId) async {

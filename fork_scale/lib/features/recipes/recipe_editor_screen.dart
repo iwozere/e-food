@@ -34,6 +34,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
   late List<RecipeItem> _items;
   String? _yieldError;
   bool _saving = false;
+  double _multiplier = 1.0;
   List<_SfcdResult> _searchResults = [];
   bool _searching = false;
 
@@ -137,6 +138,22 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
     }
   }
 
+  void _applyMultiplier(double target) {
+    if (target == _multiplier) return;
+    final ratio = target / _multiplier;
+    final newYield = _yieldG * ratio;
+    setState(() {
+      _multiplier = target;
+      _items = _items
+          .map((i) => i.copyWith(
+                weightG: i.weightG * ratio,
+                totalKcal: i.totalKcal * ratio,
+              ))
+          .toList();
+      _yieldCtrl.text = newYield.toStringAsFixed(0);
+    });
+  }
+
   Future<void> _searchSfcd(String query) async {
     if (query.trim().isEmpty) {
       setState(() => _searchResults = []);
@@ -225,6 +242,36 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
                   controller: _notesCtrl,
                   maxLines: 2,
                   decoration: const InputDecoration(labelText: 'Notes (optional)'),
+                ),
+                const SizedBox(height: 16),
+                // Scale multiplier chips
+                Row(
+                  children: [
+                    const Text(
+                      'Scale',
+                      style: TextStyle(color: AppColors.subtle, fontSize: 13),
+                    ),
+                    const SizedBox(width: 8),
+                    for (final m in [0.5, 1.0, 2.0, 3.0, 4.0])
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: ChoiceChip(
+                          label: Text(
+                            m == 0.5
+                                ? '×½'
+                                : m == 1.0
+                                    ? '×1'
+                                    : '×${m.toInt()}',
+                          ),
+                          selected: _multiplier == m,
+                          onSelected: (_) => _applyMultiplier(m),
+                          selectedColor:
+                              AppColors.primary.withValues(alpha: 0.2),
+                          checkmarkColor: AppColors.primary,
+                          showCheckmark: false,
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 // Ingredient list
@@ -338,6 +385,14 @@ class _IngredientRowState extends State<_IngredientRow> {
         TextEditingController(text: widget.item.weightG.toStringAsFixed(0));
     _kcalCtrl =
         TextEditingController(text: widget.item.kcalPer100g.toStringAsFixed(0));
+  }
+
+  @override
+  void didUpdateWidget(_IngredientRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.weightG != widget.item.weightG) {
+      _weightCtrl.text = widget.item.weightG.toStringAsFixed(0);
+    }
   }
 
   @override

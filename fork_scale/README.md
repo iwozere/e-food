@@ -1,34 +1,47 @@
 # ForkScale
 
-**On-device food calorie estimator.** Photograph a plate of food with a fork, knife, or spoon beside it as a physical scale reference — Gemini AI identifies the ingredients, estimates their weights, and logs the calories. No account, no cloud sync, all data stays on device.
+**On-device food calorie estimator.** Photograph a plate of food with a fork, knife, or spoon beside it as a physical scale reference — Gemini AI identifies the ingredients, estimates their weights, and logs the calories. Meals can also be logged via barcode scan or by recording a portion of a saved recipe. No account, no cloud sync, all data stays on device.
 
 ---
 
 ## Features
 
 ### Log tab — camera analysis
-- Tap the shutter to capture a photo; the utensil in the frame is used as a ruler to estimate portion sizes
-- Gemini 2.5 Flash (vision) identifies ingredients, estimates weights, and returns kcal/100g values cross-referenced against the bundled USDA FoodData Central SR Legacy database
-- Photos can be saved as **pending** (analyzed later) or immediately sent to Gemini
-- **Barcode scanner** (top-right icon) — scan any EAN-8/13 or QR barcode; nutrition data fetched from Open Food Facts (covers Swiss retailers and international products); results cached locally for 30 days
-- **Recent meals strip** — horizontal scroll of the last 5 distinct meals; tap a chip to re-log it instantly to today
+- Tap the shutter (or pick from gallery) to capture a photo; the utensil in the frame is used as a ruler to estimate portion sizes
+- Gemini 2.5 Flash identifies ingredients, estimates weights, and returns kcal/100g values
+- Photos can be saved as **pending** (analyzed later) if the API is unavailable — tap "Analyze now" from History any time
+- **Barcode scanner** (top-right icon) — scan any EAN-8 to EAN-14 barcode; nutrition data fetched from Open Food Facts (covers Swiss retailers and international products); results cached locally for 30 days
+- **Multi-item barcode meals** — tap "Add more items" on any barcode result to open the Meal Builder; scan or enter additional products and log them as a single combined meal entry
+- **Recent meals strip** — horizontal scroll of the last 5 distinct meals; tap a chip to re-log it instantly to today; "Logged today" badge appears if already done
 
 ### Recipes tab
-- Create and manage recipes with ingredients sourced three ways: manual entry, barcode scan, or autocomplete from the Swiss Food Composition Database (SFCD, German-language, ~1 190 items)
-- Yield weight and kcal/100g are calculated automatically from ingredients
-- Long-press a recipe card for Edit / Duplicate / Delete
-- Tap a recipe to view the full ingredient list and log a portion (weight picker with live kcal preview)
+- Create and manage recipes with ingredients sourced three ways: **search** from the Swiss Food Composition Database (SFCD, ~1190 items, offline), **barcode scan**, or **manual entry**
+- Yield weight and kcal/100g are calculated automatically from ingredients; the summary bar updates live
+- **Scale chips** (×½, ×1, ×2, ×3, ×4) in the Recipe Editor rescale all ingredient weights and yield proportionally — useful for double batches or halved portions
+- Tap a recipe to view the full ingredient list and **log a portion** — weight picker with live kcal preview
+- Long-press a recipe card for Edit / **Duplicate** / Delete
 
 ### History tab
-- Full log of all meals sorted by date; starred meals bubble up
-- Filter by meal type (Breakfast / Lunch / Dinner / Snack)
+- **Day summary bar**: today's total kcal vs. daily goal (configurable) with a progress bar
+- **Weekly bar chart**: last 7 days; tap a bar to filter the list to that day; goal shown as a dashed line
+- **Filter chips**: starred meals; meal type (Breakfast / Lunch / Dinner / Snack); active day; all combinable
+- **Full-text search** across meal names and notes (SQLite fts4)
 - Tap a meal to view details; long-press for a context menu (Copy to today / Delete)
-- Barcode meals show product image and pack-size info; recipe-portion meals link back to the source recipe with "Go to recipe" / "Edit recipe" shortcuts
-- Safe photo deletion: the file is only removed when no other meal references the same path
+- **Meal edit** — tap the ✏ icon on any camera or barcode meal to correct weights, kcal/100g, meal type, or notes; History and the day chart refresh on return
+- Barcode meals show product image and nutrition info; recipe-portion meals link back to the source recipe with "Go to recipe" / "Edit recipe" shortcuts
+- Safe photo deletion: the file is only removed when no other meal references the same path (relevant after "Copy to today")
+
+### Insights tab
+- **Streak**: consecutive days with at least one logged meal
+- **Average daily intake**: 7-day and 30-day averages side by side
+- **This week**: days logged and days over goal (out of 7)
+- **Top 5 most-logged meals**: by frequency, with average kcal per log
 
 ### Settings tab
-- Enter and save your **Gemini API key** (stored in Flutter Secure Storage, never leaves the device)
-- Configure utensil lengths (fork / knife / spoon) for more accurate scale estimation
+- Enter and save your **Gemini API key** (stored in SharedPreferences)
+- Configure **daily calorie goal** (default 2000 kcal)
+- Set **default utensil** and fine-tune **utensil lengths** (cm) used in the Gemini prompt
+- **Export to CSV** — share all meal history as a CSV file via the system share sheet
 - **Integrations** section (collapsed): optional Pepesto API key for CHF pricing on Swiss products
 
 ---
@@ -38,11 +51,11 @@
 | Layer | Library |
 |---|---|
 | UI | Flutter 3.x (Material 3) |
-| State | flutter_riverpod + riverpod_generator |
-| Navigation | go_router (StatefulShellRoute — 4-tab bottom nav) |
-| AI vision | Gemini 2.5 Flash API (`google/generative-ai`) via `http` |
+| State | flutter_riverpod |
+| Navigation | go_router (StatefulShellRoute — 5-tab bottom nav) |
+| AI vision | Gemini 2.5 Flash API via `http` |
 | Local DB | sqflite v4 (`fork_scale.db`) |
-| Nutrition reference | USDA FoodData Central SR Legacy (bundled SQLite, ~30 MB) |
+| Nutrition reference | USDA FoodData Central SR Legacy (bundled SQLite, ~30 MB) — wired into `GeminiService`; overrides LLM kcal/100g when a match is found |
 | Autocomplete | Swiss Food Composition Database v7 (bundled SQLite, ~220 KB, built via `tool/build_sfcd.py`) |
 | Barcode | mobile_scanner (ML Kit / AVFoundation) |
 | Product lookup | Open Food Facts API (no key required) |
@@ -54,18 +67,23 @@
 ## Navigation routes
 
 ```
-/ (Log tab — camera)
-/recipes (Recipes tab)
-/history (History tab)
-/settings (Settings tab)
+Shell (bottom nav)
+  /              Log tab — camera
+  /recipes       Recipes tab
+  /history       History tab
+  /insights      Insights tab
+  /settings      Settings tab
 
-/results              — Analysis results (full-screen, no nav bar)
-/scan                 — Barcode scanner (full-screen)
-/barcode-result       — Barcode product detail / log screen
-/history/:id          — Meal detail
-/recipes/new          — New recipe editor
-/recipes/:id          — Recipe detail
-/recipes/:id/edit     — Edit existing recipe
+Full-screen (no bottom nav)
+  /results              Analysis results
+  /scan                 Barcode scanner
+  /barcode-result       Barcode product detail / log screen
+  /barcode-meal-builder Multi-item barcode meal builder
+  /history/:id          Meal detail
+  /history/:id/edit     Meal edit screen
+  /recipes/new          New recipe editor
+  /recipes/:id          Recipe detail
+  /recipes/:id/edit     Edit existing recipe
 ```
 
 ---
@@ -95,7 +113,7 @@ recipe_items     — id, recipe_id, name, weight_g, kcal_per_100g, total_kcal,
 ### Prerequisites
 - Flutter SDK ≥ 3.10.7 / Dart ≥ 3.10.7
 - A [Gemini API key](https://aistudio.google.com/app/apikey) (free tier works)
-- Python 3.9+ with `openpyxl` (for the SFCD asset build step below)
+- Python 3.9+ with `openpyxl` (for the SFCD asset build step)
 
 ### 1. Clone and install
 ```powershell
@@ -112,7 +130,7 @@ pip install openpyxl
 python tool/build_sfcd.py
 ```
 
-This downloads the latest XLSX from `naehrwertdaten.ch`, parses ~1 190 food items, and writes `assets/db/sfcd.db`. The asset is already declared in `pubspec.yaml`.
+This downloads the latest XLSX from `naehrwertdaten.ch`, parses ~1190 food items, and writes `assets/db/sfcd.db`. The asset is already declared in `pubspec.yaml`.
 
 > The app runs without this file — ingredient autocomplete in the recipe editor will simply return no results until the asset is present.
 
@@ -130,14 +148,18 @@ On first launch, open **Settings** and paste your Gemini API key.
 | ADR | Decision |
 |---|---|
 | ADR-001 | On-device Moondream model deferred — no stable Flutter binding exists. Gemini-only for now. |
-| ADR-002 | USDA FoodData Central SR Legacy bundled as a Flutter asset. LLM estimates weights only; kcal/100g resolved from USDA with fuzzy matching. Falls back to LLM value with a warning if no match found. |
-| ADR-003 | go_router `StatefulShellRoute.indexedStack` with 4 tabs (Log / Recipes / History / Settings). Full-screen routes (results, scanner, detail screens) are outside the shell. |
-| ADR-004 | Images are resized to max 800 px longest side (JPEG 85) before the Gemini API call; a 1200×1200 copy is saved to disk in parallel. Resize runs in a background isolate. |
+| ADR-002 | USDA FoodData Central SR Legacy bundled as a Flutter asset. `UsdaService` wired into `GeminiService` — USDA kcal/100g overrides LLM value when a match is found; falls back to LLM value silently. |
+| ADR-003 | go_router `StatefulShellRoute.indexedStack` with 5 tabs (Log / Recipes / History / Insights / Settings). Full-screen routes use `context.push` (not `go`) so the shell branch stays in the back stack. |
+| ADR-004 | Images resized to max 800 px (JPEG 85) before the Gemini API call; 1200 px copy saved to disk in parallel. Both run in a background isolate. |
 | ADR-005 | Color palette: primary `#1B4332` (dark green), background `#FFF8F0` (warm cream), accent `#F4A523` (amber), error `#D62828`. |
-| ADR-006 | Open Food Facts API is the single barcode product lookup endpoint (covers all Swiss retailers + international). Pepesto API for CHF pricing is optional enrichment (key in Settings → Integrations). |
+| ADR-006 | Open Food Facts API is the single barcode lookup endpoint (covers all Swiss retailers + international). Pepesto API for CHF pricing is optional (key in Settings → Integrations). |
 | ADR-007 | SFCD bundled as `assets/db/sfcd.db`, built at dev time via `tool/build_sfcd.py`. App returns empty autocomplete results gracefully if asset is missing. |
-| ADR-008 | `recipe_portion` meal detail reads ingredients from `recipe_items` via `recipe_id` at display time (not duplicated). Editing a recipe after a meal is logged does **not** retroactively change that meal's `total_kcal`. |
-| ADR-009 | Photo reference counting in `deleteMeal()`: checks `COUNT(*) FROM meals WHERE photo_path = ?` before deleting the file on disk. Multiple meals can share a path (via "Copy to today"). |
+| ADR-008 | `recipe_portion` meals store only `recipe_id` + `portion_g`; ingredients are read from `recipe_items` at display time, not duplicated. Logged `total_kcal` is immutable — recipe edits do not retroactively change past meal totals. |
+| ADR-009 | Reference-counted photo deletion: `deleteMeal()` checks `COUNT(*) FROM meals WHERE photo_path = ?` before removing the file. "Copy to today" shares file paths without duplicating files. |
+| ADR-010 | Barcode scanner uses `context.push` (not `pushReplacement`) to the result screen, then forwards the return value with `context.pop(result)`. This keeps the `/scan` future alive so the Recipe Editor's `.then()` callback receives ingredient data. |
+| ADR-011 | History search uses SQLite fts4 (not fts5 — not available in default iOS/Android SQLite builds). `meals_fts MATCH ?` is issued via `_searchMeals`; activated automatically when `getMeals(searchQuery:)` is called. |
+| ADR-012 | Recipe scaling uses ratio-based in-place mutation (`ratio = target / _multiplier`). Keeping immutable base items was rejected as it requires unscaling user edits on every callback. `_IngredientRow.didUpdateWidget` syncs weight controllers when scaling fires. |
+| ADR-013 | Multi-item barcode meal builder uses a dedicated `/barcode-meal-builder` route and `BarcodeMealBuilderScreen`. "Add more items" on `BarcodeResultScreen` passes the current item as `initialItem`; subsequent scans reuse the existing `forRecipe: true` push+pop pattern unchanged. |
 
 ---
 
@@ -146,4 +168,4 @@ On first launch, open **Settings** and paste your Gemini API key.
 - No analytics, no telemetry, no cloud sync
 - All data (meals, photos, recipes, cached products) is stored locally on the device
 - The Gemini API key is stored in the OS secure enclave (Keychain on iOS, EncryptedSharedPreferences on Android)
-- The only outbound network calls are to the Gemini API (photo + prompt) and the Open Food Facts API (barcode lookups)
+- Outbound network calls: Gemini API (photo + prompt) and Open Food Facts API (barcode lookups) only

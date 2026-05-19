@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/open_food_facts_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../history/history_providers.dart';
 import '../../models/cached_product.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
@@ -126,6 +127,9 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
     );
     await ref.read(mealsRepositoryProvider).insertMeal(meal);
     if (!mounted) return;
+    ref.invalidate(historyMealsProvider);
+    ref.invalidate(historyDayTotalProvider);
+    ref.invalidate(historyWeeklyKcalProvider);
     context.go('/history');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${_nameCtrl.text} logged (${total.round()} kcal)')),
@@ -282,6 +286,26 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
               label: const Text('Add to recipe'),
             ),
           ]),
+          if (!widget.forRecipe) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  final kcalPer100 = double.tryParse(_kcalCtrl.text) ?? p.kcalPer100g;
+                  context.push('/barcode-meal-builder', extra: <String, dynamic>{
+                    'name': _nameCtrl.text.trim(),
+                    'kcalPer100g': kcalPer100,
+                    'weightG': _amount,
+                    'barcode': widget.barcode,
+                    'mealType': _mealType,
+                  });
+                },
+                icon: const Icon(Icons.playlist_add),
+                label: const Text('Add more items'),
+              ),
+            ),
+          ],
           const SizedBox(height: 32),
         ],
       ),
@@ -476,6 +500,9 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
         ],
       ));
       if (!mounted) return;
+      ref.invalidate(historyMealsProvider);
+      ref.invalidate(historyDayTotalProvider);
+      ref.invalidate(historyWeeklyKcalProvider);
       context.go('/history');
     } finally {
       if (mounted) setState(() => _saving = false);

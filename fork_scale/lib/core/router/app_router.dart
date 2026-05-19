@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
+import '../../features/barcode/barcode_meal_builder_screen.dart';
 import '../../features/barcode/barcode_result_screen.dart';
 import '../../features/barcode/barcode_scanner_screen.dart';
 import '../../features/capture/capture_screen.dart';
@@ -12,6 +13,7 @@ import '../../features/history/meal_edit_screen.dart';
 import '../../features/recipes/recipe_detail_screen.dart';
 import '../../features/recipes/recipe_editor_screen.dart';
 import '../../features/recipes/recipes_screen.dart';
+import '../../features/insights/insights_screen.dart';
 import '../../features/results/results_screen.dart';
 import '../../features/settings/settings_screen.dart';
 import '../../models/analysis_result.dart';
@@ -58,6 +60,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           final barcode = extra['barcode'] as String;
           final forRecipe = extra['forRecipe'] as bool? ?? false;
           return BarcodeResultScreen(barcode: barcode, forRecipe: forRecipe);
+        },
+      ),
+      GoRoute(
+        path: '/barcode-meal-builder',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return BarcodeMealBuilderScreen(initialItem: extra);
         },
       ),
       GoRoute(
@@ -117,6 +126,12 @@ final routerProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: '/history',
               builder: (_, _) => const HistoryScreen(),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/insights',
+              builder: (_, _) => const InsightsScreen(),
             ),
           ]),
           StatefulShellBranch(routes: [
@@ -182,9 +197,15 @@ class _ScaffoldWithNav extends StatelessWidget {
         label: 'History',
       ),
       NavigationDestination(
+        icon: Icon(Icons.bar_chart_outlined, color: iconColor),
+        selectedIcon: Icon(Icons.bar_chart,
+            color: activeIndex == 3 ? AppColors.primary : null),
+        label: 'Insights',
+      ),
+      NavigationDestination(
         icon: Icon(Icons.settings_outlined, color: iconColor),
         selectedIcon: Icon(Icons.settings,
-            color: activeIndex == 3 ? AppColors.primary : null),
+            color: activeIndex == 4 ? AppColors.primary : null),
         label: 'Settings',
       ),
     ];

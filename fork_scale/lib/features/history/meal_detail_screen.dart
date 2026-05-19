@@ -123,7 +123,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
           if (meal != null && !meal.pending) ...[
-            if (meal.source == 'camera')
+            if (meal.source != 'recipe_portion')
               IconButton(
                 icon: const Icon(Icons.edit_outlined),
                 tooltip: 'Edit meal',
