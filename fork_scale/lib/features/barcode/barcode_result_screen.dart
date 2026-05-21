@@ -106,9 +106,18 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
     if (p == null) return;
     final kcalPer100 = double.tryParse(_kcalCtrl.text) ?? p.kcalPer100g;
     final total = _amount / 100 * kcalPer100;
+
+    String photoPath = '';
+    if (p.imageUrl != null) {
+      final imgSvc = ref.read(imageServiceProvider);
+      final filename =
+          'barcode_${widget.barcode}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      photoPath = await imgSvc.downloadAndSave(p.imageUrl!, filename: filename) ?? '';
+    }
+
     final meal = Meal(
       createdAt: DateTime.now(),
-      photoPath: '',
+      photoPath: photoPath,
       name: _nameCtrl.text.trim(),
       totalKcal: total,
       utensil: 'fork',
@@ -272,6 +281,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
                     'kcalPer100g': kcalPer100,
                     'weightG': _amount,
                     'barcode': widget.barcode,
+                    'imageUrl': p.imageUrl,
                   });
                 } else {
                   context.push('/recipes/new', extra: {
@@ -299,6 +309,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
                     'weightG': _amount,
                     'barcode': widget.barcode,
                     'mealType': _mealType,
+                    'imageUrl': p.imageUrl,
                   });
                 },
                 icon: const Icon(Icons.playlist_add),

@@ -6,6 +6,7 @@ import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/analysis_result.dart';
 import '../../models/meal.dart';
+import '../history/history_providers.dart';
 import 'results_notifier.dart';
 import 'ingredient_card.dart';
 
@@ -65,6 +66,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       );
       final id = await repo.insertMeal(meal);
       if (!mounted) return;
+      ref.invalidate(historyMealsProvider);
+      ref.invalidate(historyDayTotalProvider);
+      ref.invalidate(historyWeeklyKcalProvider);
       context.go('/history');
       context.push('/history/$id');
     } finally {

@@ -14,12 +14,14 @@ class _Item {
   double weightG;
   double kcalPer100g;
   final String? barcode;
+  final String? imageUrl;
 
   _Item({
     required this.name,
     required this.weightG,
     required this.kcalPer100g,
     this.barcode,
+    this.imageUrl,
   });
 
   double get totalKcal => weightG / 100 * kcalPer100g;
@@ -53,6 +55,7 @@ class _BarcodeMealBuilderScreenState
               weightG: (init['weightG'] as double?) ?? 100.0,
               kcalPer100g: (init['kcalPer100g'] as double?) ?? 0.0,
               barcode: init['barcode'] as String?,
+              imageUrl: init['imageUrl'] as String?,
             ),
           ]
         : [];
@@ -81,6 +84,7 @@ class _BarcodeMealBuilderScreenState
           weightG: (result['weightG'] as double?) ?? 100.0,
           kcalPer100g: (result['kcalPer100g'] as double?) ?? 0.0,
           barcode: result['barcode'] as String?,
+          imageUrl: result['imageUrl'] as String?,
         ));
       });
     }
@@ -112,9 +116,21 @@ class _BarcodeMealBuilderScreenState
       final names = _items.take(2).map((i) => i.name).join(', ');
       final mealName = _items.length > 2 ? '$names…' : names;
 
+      String photoPath = '';
+      final firstImageUrl = _items.firstWhere(
+        (i) => i.imageUrl != null,
+        orElse: () => _items.first,
+      ).imageUrl;
+      if (firstImageUrl != null) {
+        final imgSvc = ref.read(imageServiceProvider);
+        final filename =
+            'barcode_multi_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        photoPath = await imgSvc.downloadAndSave(firstImageUrl, filename: filename) ?? '';
+      }
+
       final meal = Meal(
         createdAt: DateTime.now(),
-        photoPath: '',
+        photoPath: photoPath,
         name: mealName,
         totalKcal: _totalKcal,
         utensil: 'fork',

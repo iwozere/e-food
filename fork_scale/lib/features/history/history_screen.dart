@@ -391,16 +391,16 @@ class _MealTile extends ConsumerWidget {
       confirmDismiss: (_) async {
         final confirmed = await showDialog<bool>(
           context: context,
-          builder: (_) => AlertDialog(
+          builder: (dialogContext) => AlertDialog(
             title: const Text('Delete meal?'),
             content: const Text(
                 'This will permanently delete the meal and its photo.'),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.pop(context, false),
+                  onPressed: () => Navigator.pop(dialogContext, false),
                   child: const Text('Cancel')),
               TextButton(
-                onPressed: () => Navigator.pop(context, true),
+                onPressed: () => Navigator.pop(dialogContext, true),
                 child: const Text('Delete',
                     style: TextStyle(color: AppColors.error)),
               ),

@@ -11,7 +11,11 @@
       "Bash(Write-Host \"Cache removed\")",
       "Bash(git -C \"C:\\\\dev\\\\cursor\\\\e-food\" log --oneline --all --grep=\"barcode\\\\|edit\\\\|CR-03\")",
       "Bash(git *)",
-      "Bash(Get-ChildItem *)"
+      "Bash(Get-ChildItem *)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Measure-Object)",
+      "Bash(Select-Object -ExpandProperty Count)",
+      "WebSearch"
     ]
   }
 }

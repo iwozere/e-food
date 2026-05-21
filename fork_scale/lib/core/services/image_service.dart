@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
+import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -40,6 +41,23 @@ class ImageService {
             ? img.copyResize(original, height: maxDim)
             : original);
     return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+  }
+
+  /// Downloads an image from [url] and saves it to the meal_photos dir.
+  /// Returns the absolute path, or null if the download fails.
+  Future<String?> downloadAndSave(String url, {required String filename}) async {
+    try {
+      final response = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return null;
+      final dir = await _photoDir();
+      final dest = File(p.join(dir.path, filename));
+      await dest.writeAsBytes(response.bodyBytes, flush: true);
+      return dest.path;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> deletePhoto(String path) async {
