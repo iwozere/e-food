@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   CameraController? _controller;
   List<CameraDescription> _cameras = [];
   bool _isAnalysing = false;
+  bool _cameraInitializing = false; // guard against concurrent inits
   String _utensil = 'fork';
   String? _errorMessage;
   String? _pendingSavedPath;
@@ -46,28 +48,47 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_controller == null || !_controller!.value.isInitialized) return;
     if (state == AppLifecycleState.inactive) {
-      _controller?.dispose();
+      // Null _controller first so the preview widget shows a spinner instead
+      // of trying to render from a disposed controller.
+      final old = _controller;
+      if (mounted) setState(() => _controller = null);
+      old?.dispose();
     } else if (state == AppLifecycleState.resumed) {
       _initCamera();
     }
   }
 
   Future<void> _initCamera() async {
-    _cameras = await availableCameras();
-    if (_cameras.isEmpty) {
-      setState(() => _errorMessage = 'No camera available on this device.');
-      return;
+    // Prevent two simultaneous init calls (e.g. rapid background→foreground).
+    if (_cameraInitializing) return;
+    _cameraInitializing = true;
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
+        if (mounted) setState(() => _errorMessage = 'No camera available on this device.');
+        return;
+      }
+      final controller = CameraController(
+        _cameras.first,
+        ResolutionPreset.high,
+        enableAudio: false,
+      );
+      try {
+        await controller.initialize();
+      } catch (e) {
+        await controller.dispose();
+        if (mounted) setState(() => _errorMessage = 'Camera failed to start: $e');
+        return;
+      }
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() => _controller = controller);
+    } finally {
+      _cameraInitializing = false;
     }
-    final controller = CameraController(
-      _cameras.first,
-      ResolutionPreset.high,
-      enableAudio: false,
-    );
-    await controller.initialize();
-    if (!mounted) return;
-    setState(() => _controller = controller);
   }
 
   @override
@@ -91,11 +112,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   }
 
   Future<void> _analyse(File file) async {
-    final gemini = ref.read(geminiServiceProvider);
-    if (gemini == null) {
+    // Await the FutureProvider so we always get the resolved key, not the
+    // AsyncLoading null that exists for a brief moment after a cold start.
+    final apiKey = await ref.read(geminiApiKeyProvider.future);
+    if (apiKey == null || apiKey.isEmpty) {
       _showApiKeyError();
       return;
     }
+    final gemini = GeminiService(apiKey: apiKey);
 
     _pendingSavedPath = null;
     setState(() => _isAnalysing = true);
@@ -134,6 +158,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
           utensil: _utensil,
         ),
       );
+    } on TimeoutException {
+      _showRetryError('Request timed out — save photo for later?');
     } on GeminiRateLimitException {
       _showRetryError('Rate limit reached — save photo for later?');
     } on GeminiApiException catch (e) {

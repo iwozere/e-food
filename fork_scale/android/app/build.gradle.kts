@@ -1,7 +1,8 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // kotlin-android is intentionally omitted: the Flutter Gradle Plugin now
+    // supplies Kotlin support via "Built-in Kotlin" (flutter.dev/go/built-in-kotlin).
+    // Explicitly applying kotlin-android here causes a deprecation warning.
     id("dev.flutter.flutter-gradle-plugin")
 }
 

@@ -96,7 +96,7 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
       Uri.parse('$_baseUrl?key=$apiKey'),
       headers: {'Content-Type': 'application/json'},
       body: body,
-    );
+    ).timeout(const Duration(seconds: 90));
 
     if (response.statusCode == 429) {
       throw const GeminiRateLimitException();
