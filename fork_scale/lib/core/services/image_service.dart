@@ -7,6 +7,27 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 class ImageService {
+  /// Processes a capture in one decode pass: resizes for the Gemini API
+  /// (max 1536 px) and saves a history copy (max 1200 px) in a single
+  /// background isolate. Avoids decoding the source JPEG twice.
+  Future<({Uint8List apiBytes, String savedPath})> processCapture(
+    File source, {
+    required String filename,
+  }) async {
+    final srcBytes = await source.readAsBytes();
+    final (:apiBytes, :historyBytes) = await Isolate.run(() {
+      final original = img.decodeImage(srcBytes)!;
+      return (
+        apiBytes: _encodeResized(original, 1536),
+        historyBytes: _encodeResized(original, 1200),
+      );
+    });
+    final dir = await _photoDir();
+    final dest = File(p.join(dir.path, filename));
+    await dest.writeAsBytes(historyBytes, flush: true);
+    return (apiBytes: apiBytes, savedPath: dest.path);
+  }
+
   /// Resizes [source] to max 1536px longest side for Gemini API call.
   /// Runs in a background isolate. Returns JPEG bytes.
   Future<Uint8List> resizeForApi(File source) async {
@@ -32,7 +53,10 @@ class ImageService {
   }
 
   static Uint8List _resize(Uint8List bytes, int maxDim) {
-    final original = img.decodeImage(bytes)!;
+    return _encodeResized(img.decodeImage(bytes)!, maxDim);
+  }
+
+  static Uint8List _encodeResized(img.Image original, int maxDim) {
     final resized = original.width > original.height
         ? (original.width > maxDim
             ? img.copyResize(original, width: maxDim)

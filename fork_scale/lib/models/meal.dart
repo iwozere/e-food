@@ -1,3 +1,4 @@
+import 'enums.dart';
 import 'meal_item.dart';
 
 class Meal {
@@ -7,17 +8,22 @@ class Meal {
   final String? name;
   final String? notes;
   final double totalKcal;
-  final String utensil; // 'fork' | 'knife' | 'spoon'
+  final Utensil utensil;
   final String? scaleConf; // 'high' | 'medium' | 'low' | null
   final String modelUsed; // 'gemini'
-  final String? mealType; // 'breakfast' | 'lunch' | 'dinner' | 'snack'
+  final MealType? mealType;
   final bool pending;
   final bool starred;
-  final String source; // 'camera' | 'barcode' | 'recipe_portion'
+  final MealSource source;
   final String? barcode;
   final double? priceChf;
   final int? recipeId;
   final double? portionG;
+  // Denormalised per-meal macro totals (grams, nullable). Single source of
+  // truth for aggregation; recomputed from items on write when items exist.
+  final double? totalProteinG;
+  final double? totalCarbsG;
+  final double? totalFatG;
   final List<MealItem> items;
 
   const Meal({
@@ -33,61 +39,94 @@ class Meal {
     this.mealType,
     this.pending = false,
     this.starred = false,
-    this.source = 'camera',
+    this.source = MealSource.camera,
     this.barcode,
     this.priceChf,
     this.recipeId,
     this.portionG,
+    this.totalProteinG,
+    this.totalCarbsG,
+    this.totalFatG,
     this.items = const [],
   });
 
-  /// Auto-detects meal type from the hour of [at] (defaults to now).
-  static String detectTypeFromTime([DateTime? at]) {
-    final hour = (at ?? DateTime.now()).hour;
-    if (hour >= 5 && hour < 10) return 'breakfast';
-    if (hour >= 10 && hour < 15) return 'lunch';
-    if (hour >= 15 && hour < 18) return 'snack';
-    return 'dinner';
+  /// Sums each item's derived macro total, returning null per-macro when no
+  /// item contributes it (so "unknown" stays distinct from a real zero).
+  static ({double? protein, double? carbs, double? fat}) sumItemMacros(
+      List<MealItem> items) {
+    double protein = 0, carbs = 0, fat = 0;
+    var hasP = false, hasC = false, hasF = false;
+    for (final i in items) {
+      final p = i.totalProteinG;
+      final c = i.totalCarbsG;
+      final f = i.totalFatG;
+      if (p != null) { protein += p; hasP = true; }
+      if (c != null) { carbs += c; hasC = true; }
+      if (f != null) { fat += f; hasF = true; }
+    }
+    return (
+      protein: hasP ? protein : null,
+      carbs: hasC ? carbs : null,
+      fat: hasF ? fat : null,
+    );
   }
+
+  /// Auto-detects meal type from the hour of [at] (defaults to now).
+  static MealType detectTypeFromTime([DateTime? at]) {
+    final hour = (at ?? DateTime.now()).hour;
+    if (hour >= 5 && hour < 10) return MealType.breakfast;
+    if (hour >= 10 && hour < 15) return MealType.lunch;
+    if (hour >= 15 && hour < 18) return MealType.snack;
+    return MealType.dinner;
+  }
+
+  // Sentinel used by copyWith to distinguish "pass null to clear" from "omit to keep".
+  static const _absent = Object();
 
   Meal copyWith({
     int? id,
     DateTime? createdAt,
     String? photoPath,
-    String? name,
-    String? notes,
+    Object? name = _absent,
+    Object? notes = _absent,
     double? totalKcal,
-    String? utensil,
-    String? scaleConf,
+    Utensil? utensil,
+    Object? scaleConf = _absent,
     String? modelUsed,
-    String? mealType,
+    Object? mealType = _absent,
     bool? pending,
     bool? starred,
-    String? source,
-    String? barcode,
-    double? priceChf,
-    int? recipeId,
-    double? portionG,
+    MealSource? source,
+    Object? barcode = _absent,
+    Object? priceChf = _absent,
+    Object? recipeId = _absent,
+    Object? portionG = _absent,
+    Object? totalProteinG = _absent,
+    Object? totalCarbsG = _absent,
+    Object? totalFatG = _absent,
     List<MealItem>? items,
   }) {
     return Meal(
       id: id ?? this.id,
       createdAt: createdAt ?? this.createdAt,
       photoPath: photoPath ?? this.photoPath,
-      name: name ?? this.name,
-      notes: notes ?? this.notes,
+      name: name == _absent ? this.name : name as String?,
+      notes: notes == _absent ? this.notes : notes as String?,
       totalKcal: totalKcal ?? this.totalKcal,
       utensil: utensil ?? this.utensil,
-      scaleConf: scaleConf ?? this.scaleConf,
+      scaleConf: scaleConf == _absent ? this.scaleConf : scaleConf as String?,
       modelUsed: modelUsed ?? this.modelUsed,
-      mealType: mealType ?? this.mealType,
+      mealType: mealType == _absent ? this.mealType : mealType as MealType?,
       pending: pending ?? this.pending,
       starred: starred ?? this.starred,
       source: source ?? this.source,
-      barcode: barcode ?? this.barcode,
-      priceChf: priceChf ?? this.priceChf,
-      recipeId: recipeId ?? this.recipeId,
-      portionG: portionG ?? this.portionG,
+      barcode: barcode == _absent ? this.barcode : barcode as String?,
+      priceChf: priceChf == _absent ? this.priceChf : priceChf as double?,
+      recipeId: recipeId == _absent ? this.recipeId : recipeId as int?,
+      portionG: portionG == _absent ? this.portionG : portionG as double?,
+      totalProteinG: totalProteinG == _absent ? this.totalProteinG : totalProteinG as double?,
+      totalCarbsG: totalCarbsG == _absent ? this.totalCarbsG : totalCarbsG as double?,
+      totalFatG: totalFatG == _absent ? this.totalFatG : totalFatG as double?,
       items: items ?? this.items,
     );
   }
@@ -99,17 +138,20 @@ class Meal {
         'name': name,
         'notes': notes,
         'total_kcal': totalKcal,
-        'utensil': utensil,
+        'utensil': utensil.name,
         'scale_conf': scaleConf,
         'model_used': modelUsed,
-        'meal_type': mealType,
+        'meal_type': mealType?.name,
         'pending': pending ? 1 : 0,
         'starred': starred ? 1 : 0,
-        'source': source,
+        'source': source.dbValue,
         'barcode': barcode,
         'price_chf': priceChf,
         'recipe_id': recipeId,
         'portion_g': portionG,
+        'total_protein_g': totalProteinG,
+        'total_carbs_g': totalCarbsG,
+        'total_fat_g': totalFatG,
       };
 
   factory Meal.fromMap(Map<String, dynamic> map,
@@ -122,17 +164,20 @@ class Meal {
         name: map['name'] as String?,
         notes: map['notes'] as String?,
         totalKcal: (map['total_kcal'] as num).toDouble(),
-        utensil: map['utensil'] as String,
+        utensil: Utensil.parse(map['utensil'] as String),
         scaleConf: map['scale_conf'] as String?,
         modelUsed: map['model_used'] as String,
-        mealType: map['meal_type'] as String?,
+        mealType: MealType.tryParse(map['meal_type'] as String?),
         pending: (map['pending'] as int? ?? 0) != 0,
         starred: (map['starred'] as int? ?? 0) != 0,
-        source: map['source'] as String? ?? 'camera',
+        source: MealSource.parse(map['source'] as String? ?? 'camera'),
         barcode: map['barcode'] as String?,
         priceChf: (map['price_chf'] as num?)?.toDouble(),
         recipeId: map['recipe_id'] as int?,
         portionG: (map['portion_g'] as num?)?.toDouble(),
+        totalProteinG: (map['total_protein_g'] as num?)?.toDouble(),
+        totalCarbsG: (map['total_carbs_g'] as num?)?.toDouble(),
+        totalFatG: (map['total_fat_g'] as num?)?.toDouble(),
         items: items,
       );
 }

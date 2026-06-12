@@ -5,9 +5,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/recipe.dart';
-import '../history/history_providers.dart';
+import '../../widgets/meal_type_selector.dart';
 
 class LogPortionSheet extends ConsumerStatefulWidget {
   final Recipe recipe;
@@ -20,7 +21,7 @@ class LogPortionSheet extends ConsumerStatefulWidget {
 class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
   late double _portionG;
   late TextEditingController _ctrl;
-  String? _mealType;
+  MealType? _mealType;
   final _notesCtrl = TextEditingController();
   bool _saving = false;
 
@@ -41,6 +42,14 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
 
   double get _totalKcal => _portionG / 100 * widget.recipe.kcalPer100g;
 
+  // Scales a recipe-level macro total (absolute grams over the full yield) down
+  // to this portion. Null when the recipe has no data for that macro.
+  double? _scaleMacro(double? recipeTotal) {
+    final y = widget.recipe.yieldG;
+    if (recipeTotal == null || y <= 0) return null;
+    return _portionG * recipeTotal / y;
+  }
+
   void _step(int delta) {
     final v = (_portionG + delta).clamp(0, 9999).toDouble();
     setState(() {
@@ -58,18 +67,18 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
         name: widget.recipe.name,
         notes: _notesCtrl.text.isEmpty ? null : _notesCtrl.text,
         totalKcal: _totalKcal,
-        utensil: 'fork',
+        utensil: Utensil.fork,
         modelUsed: 'recipe',
         mealType: _mealType,
-        source: 'recipe_portion',
+        source: MealSource.recipePortion,
         recipeId: widget.recipe.id,
         portionG: _portionG,
+        totalProteinG: _scaleMacro(widget.recipe.totalProteinG),
+        totalCarbsG: _scaleMacro(widget.recipe.totalCarbsG),
+        totalFatG: _scaleMacro(widget.recipe.totalFatG),
       );
       await ref.read(mealsRepositoryProvider).insertMeal(meal);
       if (!mounted) return;
-      ref.invalidate(historyMealsProvider);
-      ref.invalidate(historyDayTotalProvider);
-      ref.invalidate(historyWeeklyKcalProvider);
       Navigator.pop(context);
       context.go('/history');
     } finally {
@@ -138,8 +147,8 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            _MealTypeRow(
-              current: _mealType,
+            MealTypeSelector(
+              value: _mealType,
               onChanged: (t) => setState(() => _mealType = t),
             ),
             const SizedBox(height: 12),
@@ -166,30 +175,3 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
   }
 }
 
-class _MealTypeRow extends StatelessWidget {
-  final String? current;
-  final ValueChanged<String> onChanged;
-  const _MealTypeRow({required this.current, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    const types = ['breakfast', 'lunch', 'snack', 'dinner'];
-    const labels = {
-      'breakfast': 'Breakfast',
-      'lunch': 'Lunch',
-      'snack': 'Snack',
-      'dinner': 'Dinner',
-    };
-    return Wrap(
-      spacing: 8,
-      children: types
-          .map((t) => ChoiceChip(
-                label: Text(labels[t]!),
-                selected: current == t,
-                onSelected: (_) => onChanged(t),
-                selectedColor: AppColors.accent.withValues(alpha: 0.2),
-              ))
-          .toList(),
-    );
-  }
-}

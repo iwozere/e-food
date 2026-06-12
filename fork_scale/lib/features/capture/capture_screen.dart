@@ -13,6 +13,7 @@ import '../../core/services/gemini_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/analysis_result.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
@@ -28,7 +29,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   List<CameraDescription> _cameras = [];
   bool _isAnalysing = false;
   bool _cameraInitializing = false; // guard against concurrent inits
-  String _utensil = 'fork';
+  Utensil _utensil = Utensil.fork;
   String? _errorMessage;
   String? _pendingSavedPath;
 
@@ -43,7 +44,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   Future<void> _loadDefaultUtensil() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('default_utensil') ?? 'fork';
-    if (mounted) setState(() => _utensil = saved);
+    if (mounted) setState(() => _utensil = Utensil.parse(saved));
   }
 
   @override
@@ -114,12 +115,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   Future<void> _analyse(File file) async {
     // Await the FutureProvider so we always get the resolved key, not the
     // AsyncLoading null that exists for a brief moment after a cold start.
-    final apiKey = await ref.read(geminiApiKeyProvider.future);
-    if (apiKey == null || apiKey.isEmpty) {
+    await ref.read(geminiApiKeyProvider.future);
+    final gemini = ref.read(geminiServiceProvider);
+    if (gemini == null) {
       _showApiKeyError();
       return;
     }
-    final gemini = GeminiService(apiKey: apiKey);
 
     _pendingSavedPath = null;
     setState(() => _isAnalysing = true);
@@ -127,20 +128,16 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       final imageService = ref.read(imageServiceProvider);
       final filename = '${const Uuid().v4()}.jpg';
 
-      final futures = await Future.wait([
-        imageService.resizeForApi(file),
-        imageService.saveForHistory(file, filename: filename),
-      ]);
-      final apiBytes = futures[0] as dynamic;
-      final savedPath = futures[1] as String;
+      final (:apiBytes, :savedPath) =
+          await imageService.processCapture(file, filename: filename);
       _pendingSavedPath = savedPath;
 
       final lengths = await ref.read(utensilLengthsProvider.future);
-      final lengthCm = lengths[_utensil] ?? 18.5;
+      final lengthCm = lengths[_utensil.name] ?? 18.5;
 
       final result = await gemini.analyzeImage(
         imageBytes: apiBytes,
-        utensil: _utensil,
+        utensil: _utensil.name,
         utensilLengthCm: lengthCm,
       );
 
@@ -155,7 +152,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
           totalKcal: result.totalKcal,
           notes: result.notes,
           photoPath: savedPath,
-          utensil: _utensil,
+          utensil: _utensil.name,
         ),
       );
     } on TimeoutException {
@@ -164,22 +161,33 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       _showRetryError('Rate limit reached — save photo for later?');
     } on GeminiApiException catch (e) {
       if (e.statusCode == 401 || e.statusCode == 403) {
+        _discardPendingPhoto();
         _showApiKeyError();
       } else if (e.statusCode == 503) {
         _showRetryError('Gemini is overloaded — save photo for later?');
       } else {
+        _discardPendingPhoto();
         _showError('API error (${e.statusCode}).', detail: e.body);
       }
     } on GeminiParseException catch (e) {
+      _discardPendingPhoto();
       final msg = e.truncated
           ? 'Response was cut off — please retake the photo.'
           : 'Could not read results — please retake the photo.';
       _showError(msg, detail: e.rawText);
     } catch (e) {
+      _discardPendingPhoto();
       _showError('An unexpected error occurred.', detail: e.toString());
     } finally {
       if (mounted) setState(() => _isAnalysing = false);
     }
+  }
+
+  void _discardPendingPhoto() {
+    final path = _pendingSavedPath;
+    if (path == null) return;
+    _pendingSavedPath = null;
+    ref.read(imageServiceProvider).deletePhoto(path);
   }
 
   void _showRetryError(String message) {
@@ -382,6 +390,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 // ── Recent meals strip ────────────────────────────────────────────────────────
 
 final _recentMealsProvider = FutureProvider.autoDispose<_RecentMealsData>((ref) async {
+  ref.watch(mealsChangesProvider);
   final repo = ref.read(mealsRepositoryProvider);
   final recent = await repo.getRecentDistinct(limit: 5);
   final todayNames = await repo.getMealNamesToday();
@@ -424,7 +433,6 @@ class _RecentMealsStrip extends ConsumerWidget {
                       await ref
                           .read(mealsRepositoryProvider)
                           .copyMealToToday(meal);
-                      ref.invalidate(_recentMealsProvider);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text('$name logged')),
@@ -486,8 +494,8 @@ class _InstructionBanner extends StatelessWidget {
 }
 
 class _UtensilToggle extends StatelessWidget {
-  final String utensil;
-  final ValueChanged<String> onChanged;
+  final Utensil utensil;
+  final ValueChanged<Utensil> onChanged;
   final Map<String, double> lengths;
 
   const _UtensilToggle({
@@ -496,10 +504,9 @@ class _UtensilToggle extends StatelessWidget {
     required this.lengths,
   });
 
-  String _label(String key, String emoji) {
-    final cm = (lengths[key] ?? 0).toStringAsFixed(1);
-    return '$emoji $cm cm';
-  }
+  String _cm(String key) => '${(lengths[key] ?? 0).toStringAsFixed(1)} cm';
+
+  static const _style = TextStyle(color: Colors.white, fontSize: 13);
 
   @override
   Widget build(BuildContext context) {
@@ -511,9 +518,31 @@ class _UtensilToggle extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _Tab(label: _label('fork', '🍴'), value: 'fork', current: utensil, onTap: onChanged),
-          _Tab(label: _label('knife', '🔪'), value: 'knife', current: utensil, onTap: onChanged),
-          _Tab(label: _label('spoon', '🥄'), value: 'spoon', current: utensil, onTap: onChanged),
+          _Tab(
+            label: Row(mainAxisSize: MainAxisSize.min, children: [
+              const _ForkIcon(size: 13),
+              const SizedBox(width: 5),
+              Text(_cm('fork'), style: _style),
+            ]),
+            semanticLabel: 'Fork ${_cm('fork')}',
+            value: Utensil.fork,
+            current: utensil,
+            onTap: onChanged,
+          ),
+          _Tab(
+            label: Text('🔪 ${_cm('knife')}', style: _style),
+            semanticLabel: 'Knife ${_cm('knife')}',
+            value: Utensil.knife,
+            current: utensil,
+            onTap: onChanged,
+          ),
+          _Tab(
+            label: Text('🥄 ${_cm('spoon')}', style: _style),
+            semanticLabel: 'Spoon ${_cm('spoon')}',
+            value: Utensil.spoon,
+            current: utensil,
+            onTap: onChanged,
+          ),
         ],
       ),
     );
@@ -521,13 +550,15 @@ class _UtensilToggle extends StatelessWidget {
 }
 
 class _Tab extends StatelessWidget {
-  final String label;
-  final String value;
-  final String current;
-  final ValueChanged<String> onTap;
+  final Widget label;
+  final String semanticLabel;
+  final Utensil value;
+  final Utensil current;
+  final ValueChanged<Utensil> onTap;
 
   const _Tab({
     required this.label,
+    required this.semanticLabel,
     required this.value,
     required this.current,
     required this.onTap,
@@ -536,16 +567,21 @@ class _Tab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = value == current;
-    return GestureDetector(
-      onTap: () => onTap(value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? AppColors.accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(24),
+    return Semantics(
+      button: true,
+      selected: active,
+      label: semanticLabel,
+      child: GestureDetector(
+        onTap: () => onTap(value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: active ? AppColors.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: ExcludeSemantics(child: label),
         ),
-        child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13)),
       ),
     );
   }
@@ -557,18 +593,22 @@ class _ShutterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 72,
-        height: 72,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 4),
-          color: Colors.white24,
-        ),
-        child: const Center(
-          child: CircleAvatar(radius: 28, backgroundColor: Colors.white),
+    return Semantics(
+      button: true,
+      label: 'Take photo',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 4),
+            color: Colors.white24,
+          ),
+          child: const Center(
+            child: CircleAvatar(radius: 28, backgroundColor: Colors.white),
+          ),
         ),
       ),
     );
@@ -581,17 +621,22 @@ class _GalleryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: Colors.white24,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white38),
+    return Semantics(
+      button: true,
+      label: 'Pick from gallery',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: Colors.white24,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white38),
+          ),
+          child: const Icon(Icons.photo_library, color: Colors.white,
+              semanticLabel: 'Gallery'),
         ),
-        child: const Icon(Icons.photo_library, color: Colors.white),
       ),
     );
   }
@@ -600,7 +645,7 @@ class _GalleryButton extends StatelessWidget {
 // ── Camera framing guide ──────────────────────────────────────────────────────
 
 class _CameraGuide extends StatelessWidget {
-  final String utensil;
+  final Utensil utensil;
   const _CameraGuide({required this.utensil});
 
   @override
@@ -620,32 +665,34 @@ class _CameraGuide extends StatelessWidget {
           Positioned(
             left: cx - 18,
             top: cy - r - 22,
-            child: _label('Plate'),
+            child: _badge(const Text('Plate',
+                style: TextStyle(color: Colors.white70, fontSize: 11))),
           ),
           Positioned(
             left: cx - r - 64,
             top: cy - 10,
-            child: _label(_utensilEmoji),
+            child: _utensilBadge,
           ),
         ],
       );
     });
   }
 
-  String get _utensilEmoji => switch (utensil) {
-        'fork' => '🍴',
-        'knife' => '🔪',
-        _ => '🥄',
-      };
+  Widget get _utensilBadge => _badge(switch (utensil) {
+        Utensil.fork => const _ForkIcon(size: 11, color: Colors.white70),
+        Utensil.knife => const Text('🔪',
+            style: TextStyle(color: Colors.white70, fontSize: 11)),
+        Utensil.spoon => const Text('🥄',
+            style: TextStyle(color: Colors.white70, fontSize: 11)),
+      });
 
-  Widget _label(String text) => Container(
+  Widget _badge(Widget child) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
         decoration: BoxDecoration(
           color: Colors.black38,
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Text(text,
-            style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        child: child,
       );
 }
 
@@ -676,4 +723,54 @@ class _GuidePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _GuidePainter old) =>
       old.cx != cx || old.cy != cy || old.r != r;
+}
+
+// ── Fork icon (CustomPaint) ───────────────────────────────────────────────────
+// Used in the utensil toggle and camera guide badge. No standard fork-only
+// Unicode emoji exists, so we draw a 3-tine fork with a handle.
+
+class _ForkIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _ForkIcon({this.size = 14, this.color = Colors.white});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size(size * 0.55, size),
+      painter: _ForkPainter(color: color),
+    );
+  }
+}
+
+class _ForkPainter extends CustomPainter {
+  final Color color;
+  const _ForkPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final sw = w * 0.20;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = sw
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    // Handle: center, from bottom up to 55% height
+    canvas.drawLine(Offset(w / 2, h), Offset(w / 2, h * 0.52), paint);
+
+    // Shoulder: horizontal bridge connecting tines to handle
+    canvas.drawLine(Offset(sw / 2, h * 0.52), Offset(w - sw / 2, h * 0.52), paint);
+
+    // 3 tines evenly spaced across the width
+    for (var i = 0; i < 3; i++) {
+      final x = sw / 2 + (w - sw) * i / 2;
+      canvas.drawLine(Offset(x, h * 0.52), Offset(x, h * 0.05), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ForkPainter old) => old.color != color;
 }

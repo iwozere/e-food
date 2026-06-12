@@ -1,10 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/analysis_result.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
 
-String _autoDetectMealType([DateTime? at]) => Meal.detectTypeFromTime(at);
+MealType _autoDetectMealType([DateTime? at]) => Meal.detectTypeFromTime(at);
 
 class ResultsState {
   final List<MealItem> items;
@@ -12,8 +13,8 @@ class ResultsState {
   final bool utensilDetected;
   final String? scaleConfidence;
   final String photoPath;
-  final String utensil;
-  final String mealType;
+  final Utensil utensil;
+  final MealType mealType;
   final Set<int> editedIndices;
 
   const ResultsState({
@@ -35,8 +36,8 @@ class ResultsState {
     bool? utensilDetected,
     String? scaleConfidence,
     String? photoPath,
-    String? utensil,
-    String? mealType,
+    Utensil? utensil,
+    MealType? mealType,
     Set<int>? editedIndices,
   }) {
     return ResultsState(
@@ -60,7 +61,7 @@ class ResultsNotifier extends StateNotifier<ResultsState> {
           utensilDetected: result.utensilDetected,
           scaleConfidence: result.scaleConfidence,
           photoPath: result.photoPath,
-          utensil: result.utensil,
+          utensil: Utensil.parse(result.utensil),
           mealType: _autoDetectMealType(result.capturedAt),
         ));
 
@@ -75,7 +76,11 @@ class ResultsNotifier extends StateNotifier<ResultsState> {
 
   void deleteItem(int index) {
     final items = List.of(state.items)..removeAt(index);
-    state = state.copyWith(items: items);
+    final remapped = state.editedIndices
+        .where((i) => i != index)
+        .map((i) => i > index ? i - 1 : i)
+        .toSet();
+    state = state.copyWith(items: items, editedIndices: remapped);
   }
 
   void addItem() {
@@ -94,7 +99,7 @@ class ResultsNotifier extends StateNotifier<ResultsState> {
     state = state.copyWith(notes: notes);
   }
 
-  void updateMealType(String mealType) {
+  void updateMealType(MealType mealType) {
     state = state.copyWith(mealType: mealType);
   }
 }

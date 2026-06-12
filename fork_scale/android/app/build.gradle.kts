@@ -9,9 +9,8 @@ plugins {
 android {
     namespace = "com.forkscale.fork_scale"
     compileSdk = flutter.compileSdkVersion
-    // NDK r28 uses SDK XML v4; AGP's CXX module currently warns about v4 (CXX5304).
-    // This is a known upstream toolchain issue — the build succeeds.
-    ndkVersion = flutter.ndkVersion // "28.2.13676358"
+    // Pinned to NDK r27 (XML v3) to avoid CXX5304 warning from NDK r28's XML v4 format.
+    ndkVersion = "27.2.12479018"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

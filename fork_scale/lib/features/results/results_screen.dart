@@ -6,7 +6,7 @@ import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/analysis_result.dart';
 import '../../models/meal.dart';
-import '../history/history_providers.dart';
+import '../../widgets/meal_type_selector.dart';
 import 'results_notifier.dart';
 import 'ingredient_card.dart';
 
@@ -66,9 +66,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       );
       final id = await repo.insertMeal(meal);
       if (!mounted) return;
-      ref.invalidate(historyMealsProvider);
-      ref.invalidate(historyDayTotalProvider);
-      ref.invalidate(historyWeeklyKcalProvider);
       context.go('/history');
       context.push('/history/$id');
     } finally {
@@ -78,15 +75,10 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return ProviderScope(
-      overrides: [
-        resultsNotifierProvider.overrideWith((_) => ResultsNotifier(widget.result)),
-      ],
-      child: _ResultsBody(
-        provider: _provider,
-        onSave: _saveMeal,
-        saving: _saving,
-      ),
+    return _ResultsBody(
+      provider: _provider,
+      onSave: _saveMeal,
+      saving: _saving,
     );
   }
 }
@@ -124,13 +116,16 @@ class _ResultsBody extends ConsumerWidget {
             ),
           SliverList.builder(
             itemCount: state.items.length,
-            itemBuilder: (context, i) => IngredientCard(
-              key: ValueKey('item_$i'),
-              item: state.items[i],
-              isEdited: state.editedIndices.contains(i),
-              onChanged: (updated) => notifier.updateItem(i, updated),
-              onDelete: () => notifier.deleteItem(i),
-            ),
+            itemBuilder: (context, i) {
+              final item = state.items[i];
+              return IngredientCard(
+                key: ValueKey(item.id ?? identityHashCode(item)),
+                item: item,
+                isEdited: state.editedIndices.contains(i),
+                onChanged: (updated) => notifier.updateItem(i, updated),
+                onDelete: () => notifier.deleteItem(i),
+              );
+            },
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -143,9 +138,10 @@ class _ResultsBody extends ConsumerWidget {
             ),
           ),
           SliverToBoxAdapter(
-            child: _MealTypeRow(
-              selected: state.mealType,
+            child: MealTypeSelector(
+              value: state.mealType,
               onChanged: notifier.updateMealType,
+              showLabel: true,
             ),
           ),
           SliverToBoxAdapter(
@@ -165,58 +161,6 @@ class _ResultsBody extends ConsumerWidget {
   }
 }
 
-class _MealTypeRow extends StatelessWidget {
-  final String selected;
-  final ValueChanged<String> onChanged;
-
-  const _MealTypeRow({required this.selected, required this.onChanged});
-
-  static const _types = ['breakfast', 'lunch', 'snack', 'dinner'];
-  static const _labels = {
-    'breakfast': 'Breakfast',
-    'lunch': 'Lunch',
-    'snack': 'Snack',
-    'dinner': 'Dinner',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'MEAL TYPE',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: AppColors.subtle,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: _types.map((type) {
-              final isSelected = type == selected;
-              return ChoiceChip(
-                label: Text(_labels[type]!),
-                selected: isSelected,
-                onSelected: (_) => onChanged(type),
-                selectedColor: AppColors.primary,
-                labelStyle: TextStyle(
-                  color: isSelected ? Colors.white : null,
-                  fontWeight: isSelected ? FontWeight.w600 : null,
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _TotalBanner extends StatelessWidget {
   final double totalKcal;

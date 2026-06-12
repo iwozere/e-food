@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,14 +30,11 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
   final _nameCtrl = TextEditingController();
   final _yieldCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
-  final _searchCtrl = TextEditingController();
   String? _photoPath;
   late List<RecipeItem> _items;
   String? _yieldError;
   bool _saving = false;
   double _multiplier = 1.0;
-  List<_SfcdResult> _searchResults = [];
-  bool _searching = false;
 
   @override
   void initState() {
@@ -63,6 +61,9 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
             ((pf['prefillKcal'] as double?) ?? 0.0),
         source: 'off',
         barcode: pf['prefillBarcode'] as String?,
+        proteinPer100g: pf['prefillProtein'] as double?,
+        carbsPer100g: pf['prefillCarbs'] as double?,
+        fatPer100g: pf['prefillFat'] as double?,
       ));
     }
   }
@@ -72,7 +73,6 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
     _nameCtrl.dispose();
     _yieldCtrl.dispose();
     _notesCtrl.dispose();
-    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -154,24 +154,16 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
     });
   }
 
-  Future<void> _searchSfcd(String query) async {
-    if (query.trim().isEmpty) {
-      setState(() => _searchResults = []);
-      return;
-    }
-    setState(() => _searching = true);
-    final results = await ref.read(sfcdServiceProvider).search(query);
-    if (mounted) {
-      setState(() {
-        _searchResults = results
-            .map((r) => _SfcdResult(name: r.name, kcalPer100g: r.kcalPer100g))
-            .toList();
-        _searching = false;
-      });
-    }
-  }
-
-  void _addIngredient({String? name, double? kcalPer100g, double? weightG, String? source, String? barcode}) {
+  void _addIngredient({
+    String? name,
+    double? kcalPer100g,
+    double? weightG,
+    String? source,
+    String? barcode,
+    double? proteinPer100g,
+    double? carbsPer100g,
+    double? fatPer100g,
+  }) {
     final w = weightG ?? 100.0;
     setState(() {
       _items.add(RecipeItem(
@@ -181,6 +173,9 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
         totalKcal: w / 100 * (kcalPer100g ?? 0),
         source: source ?? 'manual',
         barcode: barcode,
+        proteinPer100g: proteinPer100g,
+        carbsPer100g: carbsPer100g,
+        fatPer100g: fatPer100g,
       ));
     });
   }
@@ -322,13 +317,16 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _AddIngredientSheet(
-        searchCtrl: _searchCtrl,
-        searchResults: _searchResults,
-        searching: _searching,
-        onSearch: _searchSfcd,
-        onSelectSfcd: (name, kcal) {
+        onSelectSfcd: (r) {
           Navigator.pop(context);
-          _addIngredient(name: name, kcalPer100g: kcal, source: 'swiss_fcd');
+          _addIngredient(
+            name: r.name,
+            kcalPer100g: r.kcalPer100g,
+            source: 'swiss_fcd',
+            proteinPer100g: r.proteinPer100g,
+            carbsPer100g: r.carbsPer100g,
+            fatPer100g: r.fatPer100g,
+          );
         },
         onScanBarcode: () {
           Navigator.pop(context);
@@ -340,6 +338,9 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
                 weightG: result['weightG'] as double?,
                 source: 'off',
                 barcode: result['barcode'] as String?,
+                proteinPer100g: result['proteinPer100g'] as double?,
+                carbsPer100g: result['carbsPer100g'] as double?,
+                fatPer100g: result['fatPer100g'] as double?,
               );
             }
           });
@@ -376,6 +377,13 @@ class _IngredientRowState extends State<_IngredientRow> {
   late TextEditingController _nameCtrl;
   late TextEditingController _weightCtrl;
   late TextEditingController _kcalCtrl;
+  late TextEditingController _proteinCtrl;
+  late TextEditingController _carbsCtrl;
+  late TextEditingController _fatCtrl;
+  late bool _macrosExpanded;
+
+  static String _fmt(double? v) =>
+      v == null ? '' : (v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString());
 
   @override
   void initState() {
@@ -385,6 +393,13 @@ class _IngredientRowState extends State<_IngredientRow> {
         TextEditingController(text: widget.item.weightG.toStringAsFixed(0));
     _kcalCtrl =
         TextEditingController(text: widget.item.kcalPer100g.toStringAsFixed(0));
+    _proteinCtrl = TextEditingController(text: _fmt(widget.item.proteinPer100g));
+    _carbsCtrl = TextEditingController(text: _fmt(widget.item.carbsPer100g));
+    _fatCtrl = TextEditingController(text: _fmt(widget.item.fatPer100g));
+    // Auto-expand when any macro is already known (e.g. after a barcode scan).
+    _macrosExpanded = widget.item.proteinPer100g != null ||
+        widget.item.carbsPer100g != null ||
+        widget.item.fatPer100g != null;
   }
 
   @override
@@ -400,12 +415,35 @@ class _IngredientRowState extends State<_IngredientRow> {
     _nameCtrl.dispose();
     _weightCtrl.dispose();
     _kcalCtrl.dispose();
+    _proteinCtrl.dispose();
+    _carbsCtrl.dispose();
+    _fatCtrl.dispose();
     super.dispose();
   }
 
   RecipeItem get _cur => widget.item;
 
   void _emit(RecipeItem updated) => widget.onChanged(updated);
+
+  // Rebuilds the item from the macro controllers. Built explicitly (not via
+  // copyWith) so a cleared field becomes null ("unknown") rather than sticking
+  // to the previous value.
+  void _emitMacros() {
+    _emit(RecipeItem(
+      id: _cur.id,
+      recipeId: _cur.recipeId,
+      name: _cur.name,
+      weightG: _cur.weightG,
+      kcalPer100g: _cur.kcalPer100g,
+      totalKcal: _cur.totalKcal,
+      source: _cur.source,
+      barcode: _cur.barcode,
+      sortOrder: _cur.sortOrder,
+      proteinPer100g: double.tryParse(_proteinCtrl.text),
+      carbsPer100g: double.tryParse(_carbsCtrl.text),
+      fatPer100g: double.tryParse(_fatCtrl.text),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -483,6 +521,59 @@ class _IngredientRowState extends State<_IngredientRow> {
                 ),
               ),
             ]),
+            const SizedBox(height: 8),
+            // Macros (per 100g) — collapsible, optional
+            InkWell(
+              onTap: () => setState(() => _macrosExpanded = !_macrosExpanded),
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      _macrosExpanded
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_right,
+                      size: 18,
+                      color: AppColors.subtle,
+                    ),
+                    const SizedBox(width: 2),
+                    const Text('Macros (per 100g)',
+                        style:
+                            TextStyle(fontSize: 12, color: AppColors.subtle)),
+                  ],
+                ),
+              ),
+            ),
+            if (_macrosExpanded)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(children: [
+                  Expanded(
+                    child: _Field(
+                      label: 'Protein (g)',
+                      controller: _proteinCtrl,
+                      onChanged: (_) => _emitMacros(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _Field(
+                      label: 'Carbs (g)',
+                      controller: _carbsCtrl,
+                      onChanged: (_) => _emitMacros(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _Field(
+                      label: 'Fat (g)',
+                      controller: _fatCtrl,
+                      onChanged: (_) => _emitMacros(),
+                    ),
+                  ),
+                ]),
+              ),
             const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerRight,
@@ -549,22 +640,17 @@ class _PhotoPicker extends StatelessWidget {
           border: Border.all(
               color: AppColors.primary.withValues(alpha: 0.2), width: 1.5),
         ),
-        child: path != null && File(path!).existsSync()
+        child: path != null
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(11),
-                child: Image.file(File(path!), fit: BoxFit.cover,
-                    width: double.infinity))
-            : const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.add_photo_alternate_outlined,
-                      size: 36, color: AppColors.primary),
-                  SizedBox(height: 8),
-                  Text('Add photo (optional)',
-                      style:
-                          TextStyle(color: AppColors.subtle, fontSize: 13)),
-                ],
-              ),
+                child: Image.file(
+                  File(path!),
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  cacheWidth: 800,
+                  errorBuilder: (_, _, _) => const _PhotoPlaceholder(),
+                ))
+            : const _PhotoPlaceholder(),
       ),
     );
   }
@@ -595,6 +681,22 @@ class _PhotoPicker extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PhotoPlaceholder extends StatelessWidget {
+  const _PhotoPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.add_photo_alternate_outlined, size: 36, color: AppColors.primary),
+        SizedBox(height: 8),
+        Text('Add photo (optional)', style: TextStyle(color: AppColors.subtle, fontSize: 13)),
+      ],
     );
   }
 }
@@ -640,36 +742,77 @@ class _SummaryBar extends StatelessWidget {
 class _SfcdResult {
   final String name;
   final double kcalPer100g;
-  const _SfcdResult({required this.name, required this.kcalPer100g});
+  final double? proteinPer100g;
+  final double? carbsPer100g;
+  final double? fatPer100g;
+  const _SfcdResult({
+    required this.name,
+    required this.kcalPer100g,
+    this.proteinPer100g,
+    this.carbsPer100g,
+    this.fatPer100g,
+  });
 }
 
-class _AddIngredientSheet extends StatelessWidget {
-  final TextEditingController searchCtrl;
-  final List<_SfcdResult> searchResults;
-  final bool searching;
-  final ValueChanged<String> onSearch;
-  final void Function(String name, double kcal) onSelectSfcd;
+class _AddIngredientSheet extends ConsumerStatefulWidget {
+  final void Function(_SfcdResult result) onSelectSfcd;
   final VoidCallback onScanBarcode;
   final VoidCallback onManual;
 
   const _AddIngredientSheet({
-    required this.searchCtrl,
-    required this.searchResults,
-    required this.searching,
-    required this.onSearch,
     required this.onSelectSfcd,
     required this.onScanBarcode,
     required this.onManual,
   });
 
   @override
+  ConsumerState<_AddIngredientSheet> createState() => _AddIngredientSheetState();
+}
+
+class _AddIngredientSheetState extends ConsumerState<_AddIngredientSheet> {
+  final _searchCtrl = TextEditingController();
+  List<_SfcdResult> _results = [];
+  bool _searching = false;
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onQueryChanged(String q) {
+    _debounce?.cancel();
+    if (q.trim().isEmpty) {
+      setState(() { _results = []; _searching = false; });
+      return;
+    }
+    setState(() => _searching = true);
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
+      final sfcdResults = await ref.read(sfcdServiceProvider).search(q.trim());
+      if (!mounted) return;
+      setState(() {
+        _results = sfcdResults
+            .map((r) => _SfcdResult(
+                  name: r.name,
+                  kcalPer100g: r.kcalPer100g,
+                  proteinPer100g: r.proteinPer100g,
+                  carbsPer100g: r.carbsPer100g,
+                  fatPer100g: r.fatPer100g,
+                ))
+            .toList();
+        _searching = false;
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.7),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -684,37 +827,37 @@ class _AddIngredientSheet extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: TextField(
-                controller: searchCtrl,
+                controller: _searchCtrl,
                 autofocus: true,
-                onChanged: onSearch,
+                onChanged: _onQueryChanged,
                 decoration: const InputDecoration(
                   hintText: 'Search food database…',
                   prefixIcon: Icon(Icons.search),
                 ),
               ),
             ),
-            if (searching)
+            if (_searching)
               const Padding(
                 padding: EdgeInsets.all(16),
                 child: CircularProgressIndicator(),
               )
-            else if (searchResults.isNotEmpty)
+            else if (_results.isNotEmpty)
               Flexible(
                 child: ListView.builder(
                   shrinkWrap: true,
-                  itemCount: searchResults.length,
+                  itemCount: _results.length,
                   itemBuilder: (_, i) {
-                    final r = searchResults[i];
+                    final r = _results[i];
                     return ListTile(
                       title: Text(r.name),
                       trailing: Text('${r.kcalPer100g.round()} kcal/100g',
                           style: const TextStyle(color: AppColors.subtle)),
-                      onTap: () => onSelectSfcd(r.name, r.kcalPer100g),
+                      onTap: () => widget.onSelectSfcd(r),
                     );
                   },
                 ),
               )
-            else if (searchCtrl.text.isNotEmpty)
+            else if (_searchCtrl.text.isNotEmpty)
               const Padding(
                 padding: EdgeInsets.all(16),
                 child: Text('No results found',
@@ -724,12 +867,12 @@ class _AddIngredientSheet extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.qr_code_scanner),
               title: const Text('Scan barcode'),
-              onTap: onScanBarcode,
+              onTap: widget.onScanBarcode,
             ),
             ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Enter manually'),
-              onTap: onManual,
+              onTap: widget.onManual,
             ),
             const SizedBox(height: 8),
           ],

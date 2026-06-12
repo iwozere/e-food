@@ -8,10 +8,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/open_food_facts_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
-import '../history/history_providers.dart';
 import '../../models/cached_product.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
+import '../../widgets/meal_type_selector.dart';
 
 class BarcodeResultScreen extends ConsumerStatefulWidget {
   final String barcode;
@@ -33,7 +34,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
   late TextEditingController _kcalCtrl;
   late TextEditingController _amountCtrl;
   double _amount = 100;
-  String? _mealType;
+  MealType? _mealType;
 
   @override
   void initState() {
@@ -120,10 +121,10 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
       photoPath: photoPath,
       name: _nameCtrl.text.trim(),
       totalKcal: total,
-      utensil: 'fork',
+      utensil: Utensil.fork,
       modelUsed: 'barcode',
       mealType: _mealType,
-      source: 'barcode',
+      source: MealSource.barcode,
       barcode: widget.barcode,
       items: [
         MealItem(
@@ -131,14 +132,14 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
           weightG: _amount,
           kcalPer100g: kcalPer100,
           totalKcal: total,
+          proteinPer100g: p.proteinG,
+          carbsPer100g: p.carbsG,
+          fatPer100g: p.fatG,
         ),
       ],
     );
     await ref.read(mealsRepositoryProvider).insertMeal(meal);
     if (!mounted) return;
-    ref.invalidate(historyMealsProvider);
-    ref.invalidate(historyDayTotalProvider);
-    ref.invalidate(historyWeeklyKcalProvider);
     context.go('/history');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${_nameCtrl.text} logged (${total.round()} kcal)')),
@@ -257,8 +258,8 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
           ),
           const SizedBox(height: 16),
           // Meal type
-          _MealTypeChips(
-            current: _mealType,
+          MealTypeSelector(
+            value: _mealType,
             onChanged: (t) => setState(() => _mealType = t),
           ),
           const SizedBox(height: 24),
@@ -282,6 +283,9 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
                     'weightG': _amount,
                     'barcode': widget.barcode,
                     'imageUrl': p.imageUrl,
+                    'proteinPer100g': p.proteinG,
+                    'carbsPer100g': p.carbsG,
+                    'fatPer100g': p.fatG,
                   });
                 } else {
                   context.push('/recipes/new', extra: {
@@ -289,6 +293,9 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
                     'prefillKcal': kcalPer100,
                     'prefillAmount': _amount,
                     'prefillBarcode': widget.barcode,
+                    'prefillProtein': p.proteinG,
+                    'prefillCarbs': p.carbsG,
+                    'prefillFat': p.fatG,
                   });
                 }
               },
@@ -389,28 +396,6 @@ class _Row extends StatelessWidget {
   }
 }
 
-class _MealTypeChips extends StatelessWidget {
-  final String? current;
-  final ValueChanged<String> onChanged;
-  const _MealTypeChips({required this.current, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    const types = ['breakfast', 'lunch', 'snack', 'dinner'];
-    const labels = {'breakfast': 'Breakfast', 'lunch': 'Lunch', 'snack': 'Snack', 'dinner': 'Dinner'};
-    return Wrap(
-      spacing: 8,
-      children: types
-          .map((t) => ChoiceChip(
-                label: Text(labels[t]!),
-                selected: current == t,
-                onSelected: (_) => onChanged(t),
-                selectedColor: AppColors.accent.withValues(alpha: 0.2),
-              ))
-          .toList(),
-    );
-  }
-}
 
 class _NotFoundScreen extends ConsumerStatefulWidget {
   final String barcode;
@@ -430,7 +415,7 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
   final _kcalCtrl = TextEditingController();
   final _amountCtrl = TextEditingController(text: '100');
   double _amount = 100;
-  String _mealType = Meal.detectTypeFromTime();
+  MealType _mealType = Meal.detectTypeFromTime();
   bool _saving = false;
 
   @override
@@ -496,10 +481,10 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
         photoPath: '',
         name: name,
         totalKcal: total,
-        utensil: 'fork',
+        utensil: Utensil.fork,
         modelUsed: 'barcode',
         mealType: _mealType,
-        source: 'barcode',
+        source: MealSource.barcode,
         barcode: widget.barcode,
         items: [
           MealItem(
@@ -511,9 +496,6 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
         ],
       ));
       if (!mounted) return;
-      ref.invalidate(historyMealsProvider);
-      ref.invalidate(historyDayTotalProvider);
-      ref.invalidate(historyWeeklyKcalProvider);
       context.go('/history');
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -635,8 +617,8 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
         ),
         if (!widget.forRecipe) ...[
           const SizedBox(height: 16),
-          _MealTypeChips(
-            current: _mealType,
+          MealTypeSelector(
+            value: _mealType,
             onChanged: (t) => setState(() => _mealType = t),
           ),
         ],

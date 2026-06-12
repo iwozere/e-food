@@ -29,6 +29,13 @@ final usdaServiceProvider = Provider<UsdaService>((_) => UsdaService());
 final mealsRepositoryProvider =
     Provider<MealsRepository>((_) => MealsRepository());
 
+/// Emits a new value after every MealsRepository write. Watching this provider
+/// in any FutureProvider causes it to automatically refetch after writes —
+/// eliminating the need for manual ref.invalidate calls.
+final mealsChangesProvider = StreamProvider<int>(
+  (ref) => ref.watch(mealsRepositoryProvider).changes,
+);
+
 final productsRepositoryProvider =
     Provider<ProductsRepository>((_) => ProductsRepository());
 
@@ -55,8 +62,3 @@ final utensilLengthsProvider =
   };
 });
 
-final pepestoApiKeyProvider = FutureProvider<String?>((ref) async {
-  final prefs = await SharedPreferences.getInstance();
-  final key = prefs.getString('pepesto_api_key') ?? '';
-  return key.isEmpty ? null : key;
-});

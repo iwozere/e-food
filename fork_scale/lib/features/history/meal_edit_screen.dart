@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
+import '../../widgets/meal_type_selector.dart';
 import '../results/ingredient_card.dart';
 
 class MealEditScreen extends ConsumerStatefulWidget {
@@ -20,7 +22,7 @@ class _MealEditScreenState extends ConsumerState<MealEditScreen> {
   late List<MealItem> _items;
   late List<double> _originalKcal; // per-item baseline for "edited" badge
   late Set<int> _editedIndices;
-  late String _mealType;
+  late MealType _mealType;
   late final TextEditingController _notesCtrl;
   bool _saving = false;
 
@@ -109,13 +111,16 @@ class _MealEditScreenState extends ConsumerState<MealEditScreen> {
           SliverToBoxAdapter(child: _TotalBanner(totalKcal: _totalKcal)),
           SliverList.builder(
             itemCount: _items.length,
-            itemBuilder: (context, i) => IngredientCard(
-              key: ValueKey('edit_$i'),
-              item: _items[i],
-              isEdited: _editedIndices.contains(i),
-              onChanged: (updated) => _updateItem(i, updated),
-              onDelete: () => _deleteItem(i),
-            ),
+            itemBuilder: (context, i) {
+              final item = _items[i];
+              return IngredientCard(
+                key: ValueKey(item.id ?? identityHashCode(item)),
+                item: item,
+                isEdited: _editedIndices.contains(i),
+                onChanged: (updated) => _updateItem(i, updated),
+                onDelete: () => _deleteItem(i),
+              );
+            },
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -128,9 +133,10 @@ class _MealEditScreenState extends ConsumerState<MealEditScreen> {
             ),
           ),
           SliverToBoxAdapter(
-            child: _MealTypeRow(
-              selected: _mealType,
+            child: MealTypeSelector(
+              value: _mealType,
               onChanged: (t) => setState(() => _mealType = t),
+              showLabel: true,
             ),
           ),
           SliverToBoxAdapter(child: _NotesField(controller: _notesCtrl)),
@@ -171,59 +177,6 @@ class _TotalBanner extends StatelessWidget {
   }
 }
 
-// ── Meal type chips ───────────────────────────────────────────────────────────
-
-class _MealTypeRow extends StatelessWidget {
-  final String selected;
-  final ValueChanged<String> onChanged;
-  const _MealTypeRow({required this.selected, required this.onChanged});
-
-  static const _types = ['breakfast', 'lunch', 'snack', 'dinner'];
-  static const _labels = {
-    'breakfast': 'Breakfast',
-    'lunch': 'Lunch',
-    'snack': 'Snack',
-    'dinner': 'Dinner',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'MEAL TYPE',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: AppColors.subtle,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: _types.map((type) {
-              final isSelected = type == selected;
-              return ChoiceChip(
-                label: Text(_labels[type]!),
-                selected: isSelected,
-                onSelected: (_) => onChanged(type),
-                selectedColor: AppColors.primary,
-                labelStyle: TextStyle(
-                  color: isSelected ? Colors.white : null,
-                  fontWeight: isSelected ? FontWeight.w600 : null,
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ── Notes field ───────────────────────────────────────────────────────────────
 

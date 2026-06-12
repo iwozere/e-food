@@ -14,8 +14,10 @@ import '../../core/services/backup_service.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/services/gemini_service.dart';
+import '../../core/database/app_database.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../history/history_providers.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -29,7 +31,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _forkLengthCtrl = TextEditingController();
   final _knifeLengthCtrl = TextEditingController();
   final _spoonLengthCtrl = TextEditingController();
-  final _pepestoCtrl = TextEditingController();
+  final _dailyGoalCtrl = TextEditingController();
   bool _obscureKey = true;
   bool _validating = false;
   String _utensil = 'fork';
@@ -38,7 +40,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   double _knifeLengthCm = 21.0;
   double _spoonLengthCm = 20.0;
   bool _loading = true;
-  bool _integrationsExpanded = false;
+  Future<String>? _storageFuture;
 
   @override
   void initState() {
@@ -52,7 +54,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _forkLengthCtrl.dispose();
     _knifeLengthCtrl.dispose();
     _spoonLengthCtrl.dispose();
-    _pepestoCtrl.dispose();
+    _dailyGoalCtrl.dispose();
     super.dispose();
   }
 
@@ -76,8 +78,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       } catch (_) {}
     }
 
-    final pepestoKey = prefs.getString('pepesto_api_key') ?? '';
-
     final forkCm = prefs.getDouble('fork_length_cm') ?? 18.5;
     final knifeCm = prefs.getDouble('knife_length_cm') ?? 21.0;
     final spoonCm = prefs.getDouble('spoon_length_cm') ?? 20.0;
@@ -91,7 +91,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _forkLengthCtrl.text = forkCm.toStringAsFixed(1);
       _knifeLengthCtrl.text = knifeCm.toStringAsFixed(1);
       _spoonLengthCtrl.text = spoonCm.toStringAsFixed(1);
-      _pepestoCtrl.text = pepestoKey;
+      _dailyGoalCtrl.text = _dailyGoal.toString();
+      _storageFuture = _storageSummary();
       _loading = false;
     });
     if (key != null && key.isNotEmpty) {
@@ -185,7 +186,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: const Text('Restore backup?'),
         content: const Text(
           'This will replace all current data with the backup. '
-          'You will need to restart the app afterwards.',
+          'The app will reload automatically.',
         ),
         actions: [
           TextButton(
@@ -203,10 +204,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final restored = await BackupService.restoreBackup();
       if (!mounted) return;
       if (restored) {
+        ref.invalidate(historyMealsProvider);
+        ref.invalidate(historyDayTotalProvider);
+        ref.invalidate(historyWeeklyKcalProvider);
         messenger.showSnackBar(
           const SnackBar(
-            content: Text('Backup restored. Please restart the app.'),
-            duration: Duration(seconds: 6),
+            content: Text('Backup restored.'),
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -248,12 +252,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
     if (confirmed != true) return;
+
     final docs = await getApplicationDocumentsDirectory();
+
+    // Close connections before touching the files.
+    await AppDatabase.closeAll();
+
+    // Delete DB and its WAL sidecars.
+    final dbBase = p.join(docs.path, 'fork_scale.db');
+    for (final ext in ['', '-wal', '-shm']) {
+      final f = File('$dbBase$ext');
+      if (await f.exists()) await f.delete();
+    }
+
+    // Delete photos.
     final photosDir = Directory(p.join(docs.path, 'meal_photos'));
     if (photosDir.existsSync()) await photosDir.delete(recursive: true);
-    final dbFile = File(p.join(docs.path, 'fork_scale.db'));
-    if (dbFile.existsSync()) await dbFile.delete();
-    messenger.showSnackBar(const SnackBar(content: Text('History cleared. Restart the app.')));
+
+    // Invalidate all providers that hold meal data — screens reload from the new empty DB.
+    ref.invalidate(historyMealsProvider);
+    ref.invalidate(historyDayTotalProvider);
+    ref.invalidate(historyWeeklyKcalProvider);
+
+    if (mounted) {
+      messenger.showSnackBar(const SnackBar(content: Text('History cleared.')));
+    }
   }
 
   @override
@@ -277,7 +300,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               child: Column(
                 children: [
                   _UtensilTile(
-                    emoji: '🍴',
+                    emoji: '',
                     label: 'Fork',
                     value: 'fork',
                     ctrl: _forkLengthCtrl,
@@ -317,8 +340,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     child: TextField(
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
-                      controller:
-                          TextEditingController(text: _dailyGoal.toString()),
+                      controller: _dailyGoalCtrl,
                       onChanged: (v) {
                         final parsed = int.tryParse(v);
                         if (parsed != null && parsed > 0) {
@@ -410,7 +432,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   FutureBuilder<String>(
-                    future: _storageSummary(),
+                    future: _storageFuture,
                     builder: (context, snap) => Text(
                       snap.data ?? 'Calculating…',
                       style: const TextStyle(color: AppColors.subtle),
@@ -448,52 +470,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          // Integrations section (collapsed by default)
-          GestureDetector(
-            onTap: () => setState(() => _integrationsExpanded = !_integrationsExpanded),
-            child: Row(
-              children: [
-                _SectionHeader('Integrations'),
-                const Spacer(),
-                Icon(
-                  _integrationsExpanded
-                      ? Icons.expand_less
-                      : Icons.expand_more,
-                  color: AppColors.subtle,
-                  size: 18,
-                ),
-              ],
-            ),
-          ),
-          if (_integrationsExpanded)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: _pepestoCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Pepesto API key (optional)',
-                        hintText: 'Enables CHF price lookup for Swiss products',
-                      ),
-                      onChanged: (v) async {
-                        final prefs = await SharedPreferences.getInstance();
-                        await prefs.setString('pepesto_api_key', v.trim());
-                        ref.invalidate(pepestoApiKeyProvider);
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Leave blank to disable price lookup. Get a key at pepesto.com.',
-                      style: TextStyle(fontSize: 12, color: AppColors.subtle),
-                    ),
-                  ],
-                ),
-              ),
-            ),
           const SizedBox(height: 32),
         ],
       ),
@@ -564,7 +540,7 @@ class _UtensilTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return RadioListTile<String>(
       value: value,
-      title: Text('$emoji $label'),
+      title: Text(emoji.isEmpty ? label : '$emoji $label'),
       secondary: SizedBox(
         width: 80,
         child: TextField(

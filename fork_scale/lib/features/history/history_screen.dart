@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import 'history_providers.dart';
 
@@ -22,7 +23,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   String? _query;
   DateTime? _selectedDay;
   bool _showStarredOnly = false;
-  String? _mealType;
+  String? _mealType; // DB column name value, passed directly to getMeals()
 
   @override
   void dispose() {
@@ -93,7 +94,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   for (final type in ['breakfast', 'lunch', 'dinner', 'snack']) ...[
                     const SizedBox(width: 8),
                     FilterChip(
-                      label: Text(_mealTypeLabel(type)),
+                      label: Text(_typeFilterLabel(type)),
                       selected: _mealType == type,
                       onSelected: (v) =>
                           setState(() => _mealType = v ? type : null),
@@ -141,7 +142,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                         ref.invalidate(historyMealsProvider);
                         ref.invalidate(historyDayTotalProvider);
                         ref.invalidate(historyWeeklyKcalProvider);
-                      },
+                      }, // pull-to-refresh: explicitly reload even with no DB write
                     ),
             ),
           ),
@@ -446,20 +447,21 @@ class _MealTile extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    GestureDetector(
-                      onTap: () async {
+                    IconButton(
+                      icon: Icon(
+                        meal.starred ? Icons.star : Icons.star_border,
+                        size: 16,
+                        color: meal.starred ? AppColors.accent : AppColors.subtle,
+                      ),
+                      onPressed: () async {
                         await ref
                             .read(mealsRepositoryProvider)
                             .starMeal(meal.id!, starred: !meal.starred);
-                        ref.invalidate(historyMealsProvider);
                       },
-                      child: Icon(
-                        meal.starred ? Icons.star : Icons.star_border,
-                        size: 16,
-                        color: meal.starred
-                            ? AppColors.accent
-                            : AppColors.subtle,
-                      ),
+                      tooltip: meal.starred ? 'Unstar meal' : 'Star meal',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -501,7 +503,6 @@ class _MealTile extends ConsumerWidget {
     if (!context.mounted) return;
     if (action == 'copy') {
       final newId = await ref.read(mealsRepositoryProvider).copyMealToToday(meal);
-      ref.invalidate(historyMealsProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -541,45 +542,51 @@ class _MealTile extends ConsumerWidget {
 
 class _Thumbnail extends StatelessWidget {
   final String path;
-  final String source;
-  const _Thumbnail({required this.path, this.source = 'camera'});
+  final MealSource source;
+  const _Thumbnail({required this.path, this.source = MealSource.camera});
 
   @override
   Widget build(BuildContext context) {
     final file = File(path);
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: file.existsSync()
-          ? Image.file(file, width: 56, height: 56, fit: BoxFit.cover)
-          : Container(
-              width: 56,
-              height: 56,
-              color: AppColors.primary.withValues(alpha: 0.1),
-              child: Center(
-                child: Text(
-                  switch (source) {
-                    'barcode' => '🔖',
-                    'recipe_portion' => '🍳',
-                    _ => '',
-                  },
-                  style: const TextStyle(fontSize: 24),
-                ),
-              ),
+      child: Image.file(
+        file,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        cacheWidth: 112,
+        cacheHeight: 112,
+        errorBuilder: (_, _, _) => Container(
+          width: 56,
+          height: 56,
+          color: AppColors.primary.withValues(alpha: 0.1),
+          child: Center(
+            child: Text(
+              switch (source) {
+                MealSource.barcode => '🔖',
+                MealSource.recipePortion => '🍳',
+                MealSource.camera => '',
+              },
+              style: const TextStyle(fontSize: 24),
             ),
+          ),
+        ),
+      ),
     );
   }
 }
 
 class _SourceBadge extends StatelessWidget {
-  final String source;
+  final MealSource source;
   const _SourceBadge({required this.source});
 
   @override
   Widget build(BuildContext context) {
     final label = switch (source) {
-      'barcode' => '🔖 Barcode',
-      'recipe_portion' => '🍳 Recipe',
-      _ => null,
+      MealSource.barcode => '🔖 Barcode',
+      MealSource.recipePortion => '🍳 Recipe',
+      MealSource.camera => null,
     };
     if (label == null) return const SizedBox.shrink();
     return Text(label,
@@ -609,10 +616,19 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-String _mealTypeLabel(String? type) => switch (type) {
+String _mealTypeLabel(MealType? type) => switch (type) {
+      MealType.breakfast => 'Breakfast',
+      MealType.lunch => 'Lunch',
+      MealType.dinner => 'Dinner',
+      MealType.snack => 'Snack',
+      null => '',
+    };
+
+// Used for filter chips where the type is kept as a raw DB column value.
+String _typeFilterLabel(String type) => switch (type) {
       'breakfast' => 'Breakfast',
       'lunch' => 'Lunch',
       'dinner' => 'Dinner',
       'snack' => 'Snack',
-      _ => '',
+      _ => type,
     };

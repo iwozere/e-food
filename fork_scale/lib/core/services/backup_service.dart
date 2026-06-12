@@ -17,6 +17,10 @@ class BackupService {
         '${now.year}-${_pad(now.month)}-${_pad(now.day)}.zip';
     final zipPath = p.join(tmp.path, name);
 
+    // Flush WAL into the main .db file so the zip contains a self-contained snapshot.
+    final db = await AppDatabase.mealsDb;
+    await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+
     final encoder = ZipFileEncoder();
     encoder.create(zipPath);
 
@@ -52,16 +56,27 @@ class BackupService {
 
     await AppDatabase.closeAll();
 
-    final bytes = await File(zipPath).readAsBytes();
-    final archive = ZipDecoder().decodeBytes(bytes);
+    // Delete stale WAL sidecars so SQLite doesn't replay them against the restored file.
+    final dbPath = p.join(docs.path, 'fork_scale.db');
+    for (final ext in ['-wal', '-shm']) {
+      final sidecar = File('$dbPath$ext');
+      if (await sidecar.exists()) await sidecar.delete();
+    }
+
+    // Use streaming decode to avoid loading the entire zip into memory at once.
+    final inputStream = InputFileStream(zipPath);
+    final archive = ZipDecoder().decodeBuffer(inputStream);
 
     for (final file in archive) {
-      if (file.isFile) {
-        final outFile = File(p.join(docs.path, file.name));
-        await outFile.create(recursive: true);
-        await outFile.writeAsBytes(file.content as List<int>);
-      }
+      if (!file.isFile) continue;
+      final outPath = p.normalize(p.join(docs.path, file.name));
+      if (!p.isWithin(docs.path, outPath)) continue; // block path-traversal entries
+      final outFile = File(outPath);
+      await outFile.create(recursive: true);
+      await outFile.writeAsBytes(file.content as List<int>);
     }
+
+    inputStream.close();
 
     return true;
   }

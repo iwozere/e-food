@@ -189,18 +189,20 @@ class _RecipePhoto extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (path != null) {
-      final f = File(path!);
-      if (f.existsSync()) {
-        return Image.file(f, fit: BoxFit.cover);
-      }
+      return Image.file(
+        File(path!),
+        fit: BoxFit.cover,
+        cacheWidth: 200,
+        errorBuilder: (_, _, _) => _placeholder,
+      );
     }
-    return Container(
-      color: AppColors.primary.withValues(alpha: 0.08),
-      child: const Center(
-        child: Text('🍳', style: TextStyle(fontSize: 40)),
-      ),
-    );
+    return _placeholder;
   }
+
+  static final _placeholder = Container(
+    color: AppColors.primary.withValues(alpha: 0.08),
+    child: const Center(child: Text('🍳', style: TextStyle(fontSize: 40))),
+  );
 }
 
 class _EmptyState extends StatelessWidget {

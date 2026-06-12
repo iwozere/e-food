@@ -25,19 +25,40 @@ class Recipe {
 
   double get totalKcal => items.fold(0.0, (s, i) => s + i.totalKcal);
 
+  // Recipe-level macro totals: sum of per-item totals, skipping unknown (null)
+  // values. Returns null when no ingredient carries that macro.
+  static double? _sumMacro(List<RecipeItem> items, double? Function(RecipeItem) pick) {
+    double sum = 0;
+    var any = false;
+    for (final i in items) {
+      final v = pick(i);
+      if (v != null) {
+        sum += v;
+        any = true;
+      }
+    }
+    return any ? sum : null;
+  }
+
+  double? get totalProteinG => _sumMacro(items, (i) => i.totalProteinG);
+  double? get totalCarbsG => _sumMacro(items, (i) => i.totalCarbsG);
+  double? get totalFatG => _sumMacro(items, (i) => i.totalFatG);
+
   static double computeKcalPer100g(List<RecipeItem> items, double yieldG) {
     if (yieldG <= 0) return 0;
     final total = items.fold(0.0, (s, i) => s + i.totalKcal);
     return total / yieldG * 100;
   }
 
+  static const _absent = Object();
+
   Recipe copyWith({
     int? id,
     String? name,
     double? yieldG,
     double? kcalPer100g,
-    String? photoPath,
-    String? notes,
+    Object? photoPath = _absent,
+    Object? notes = _absent,
     DateTime? createdAt,
     DateTime? updatedAt,
     List<RecipeItem>? items,
@@ -47,8 +68,8 @@ class Recipe {
         name: name ?? this.name,
         yieldG: yieldG ?? this.yieldG,
         kcalPer100g: kcalPer100g ?? this.kcalPer100g,
-        photoPath: photoPath ?? this.photoPath,
-        notes: notes ?? this.notes,
+        photoPath: photoPath == _absent ? this.photoPath : photoPath as String?,
+        notes: notes == _absent ? this.notes : notes as String?,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         items: items ?? this.items,

@@ -5,9 +5,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
-import '../history/history_providers.dart';
+import '../../widgets/meal_type_selector.dart';
 
 class _Item {
   String name;
@@ -15,6 +16,9 @@ class _Item {
   double kcalPer100g;
   final String? barcode;
   final String? imageUrl;
+  final double? proteinPer100g;
+  final double? carbsPer100g;
+  final double? fatPer100g;
 
   _Item({
     required this.name,
@@ -22,6 +26,9 @@ class _Item {
     required this.kcalPer100g,
     this.barcode,
     this.imageUrl,
+    this.proteinPer100g,
+    this.carbsPer100g,
+    this.fatPer100g,
   });
 
   double get totalKcal => weightG / 100 * kcalPer100g;
@@ -40,7 +47,7 @@ class _BarcodeMealBuilderScreenState
     extends ConsumerState<BarcodeMealBuilderScreen> {
   late final List<_Item> _items;
   final _notesCtrl = TextEditingController();
-  String? _mealType;
+  MealType? _mealType;
   bool _saving = false;
 
   @override
@@ -56,11 +63,17 @@ class _BarcodeMealBuilderScreenState
               kcalPer100g: (init['kcalPer100g'] as double?) ?? 0.0,
               barcode: init['barcode'] as String?,
               imageUrl: init['imageUrl'] as String?,
+              proteinPer100g: init['proteinPer100g'] as double?,
+              carbsPer100g: init['carbsPer100g'] as double?,
+              fatPer100g: init['fatPer100g'] as double?,
             ),
           ]
         : [];
-    if (init?['mealType'] is String) {
-      _mealType = init!['mealType'] as String;
+    final mt = init?['mealType'];
+    if (mt is MealType) {
+      _mealType = mt;
+    } else if (mt is String) {
+      _mealType = MealType.tryParse(mt) ?? _mealType;
     }
   }
 
@@ -85,6 +98,9 @@ class _BarcodeMealBuilderScreenState
           kcalPer100g: (result['kcalPer100g'] as double?) ?? 0.0,
           barcode: result['barcode'] as String?,
           imageUrl: result['imageUrl'] as String?,
+          proteinPer100g: result['proteinPer100g'] as double?,
+          carbsPer100g: result['carbsPer100g'] as double?,
+          fatPer100g: result['fatPer100g'] as double?,
         ));
       });
     }
@@ -133,10 +149,10 @@ class _BarcodeMealBuilderScreenState
         photoPath: photoPath,
         name: mealName,
         totalKcal: _totalKcal,
-        utensil: 'fork',
+        utensil: Utensil.fork,
         modelUsed: 'barcode',
         mealType: _mealType,
-        source: 'barcode',
+        source: MealSource.barcode,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         items: _items
             .map((i) => MealItem(
@@ -144,14 +160,14 @@ class _BarcodeMealBuilderScreenState
                   weightG: i.weightG,
                   kcalPer100g: i.kcalPer100g,
                   totalKcal: i.totalKcal,
+                  proteinPer100g: i.proteinPer100g,
+                  carbsPer100g: i.carbsPer100g,
+                  fatPer100g: i.fatPer100g,
                 ))
             .toList(),
       );
       await ref.read(mealsRepositoryProvider).insertMeal(meal);
       if (!mounted) return;
-      ref.invalidate(historyMealsProvider);
-      ref.invalidate(historyDayTotalProvider);
-      ref.invalidate(historyWeeklyKcalProvider);
       context.go('/history');
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -212,8 +228,8 @@ class _BarcodeMealBuilderScreenState
                   ],
                 ),
                 const SizedBox(height: 24),
-                _MealTypeChips(
-                  current: _mealType,
+                MealTypeSelector(
+                  value: _mealType,
                   onChanged: (t) => setState(() => _mealType = t),
                 ),
                 const SizedBox(height: 16),
@@ -530,30 +546,3 @@ class _ManualItemSheetState extends State<_ManualItemSheet> {
 
 // ── Meal type chips ───────────────────────────────────────────────────────────
 
-class _MealTypeChips extends StatelessWidget {
-  final String? current;
-  final ValueChanged<String> onChanged;
-  const _MealTypeChips({required this.current, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    const types = ['breakfast', 'lunch', 'snack', 'dinner'];
-    const labels = {
-      'breakfast': 'Breakfast',
-      'lunch': 'Lunch',
-      'snack': 'Snack',
-      'dinner': 'Dinner',
-    };
-    return Wrap(
-      spacing: 8,
-      children: types
-          .map((t) => ChoiceChip(
-                label: Text(labels[t]!),
-                selected: current == t,
-                onSelected: (_) => onChanged(t),
-                selectedColor: AppColors.accent.withValues(alpha: 0.2),
-              ))
-          .toList(),
-    );
-  }
-}

@@ -51,7 +51,7 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
 
 1. Detect the utensil and use its known length to estimate the plate diameter and food portion sizes.
 2. Identify every distinct food item on the plate.
-3. For each item estimate: weight in grams, calories per 100 g, total calories.
+3. For each item estimate: weight in grams, calories per 100 g, total calories, and macronutrients per 100 g (protein, carbohydrates, fat). Use standard nutritional knowledge for typical preparation of each food.
 4. Return ONLY valid JSON, no prose, no markdown fences:
 
 {
@@ -62,7 +62,10 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
       "name": "string",
       "weight_g": number,
       "kcal_per_100g": number,
-      "total_kcal": number
+      "total_kcal": number,
+      "protein_per_100g": number,
+      "carbs_per_100g": number,
+      "fat_per_100g": number
     }
   ],
   "total_kcal": number,
@@ -93,8 +96,11 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
     });
 
     final response = await http.post(
-      Uri.parse('$_baseUrl?key=$apiKey'),
-      headers: {'Content-Type': 'application/json'},
+      Uri.parse(_baseUrl),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
       body: body,
     ).timeout(const Duration(seconds: 90));
 
@@ -165,6 +171,9 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
         totalKcal: totalKcal,
         sortOrder: i,
         usdaMatched: usdaMatch != null,
+        proteinPer100g: (raw['protein_per_100g'] as num?)?.toDouble(),
+        carbsPer100g: (raw['carbs_per_100g'] as num?)?.toDouble(),
+        fatPer100g: (raw['fat_per_100g'] as num?)?.toDouble(),
       ));
     }
 
@@ -186,8 +195,8 @@ enum KeyValidationResult { valid, invalid, networkError }
 Future<KeyValidationResult> validateGeminiKey(String apiKey) async {
   try {
     final response = await http.get(
-      Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey&pageSize=1'),
+      Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1'),
+      headers: {'x-goog-api-key': apiKey},
     ).timeout(const Duration(seconds: 10));
     if (response.statusCode == 200) { return KeyValidationResult.valid; }
     if (response.statusCode == 400 ||

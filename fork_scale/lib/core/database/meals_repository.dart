@@ -1,43 +1,84 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
 import 'app_database.dart';
 
 class MealsRepository {
+  // Emits an incrementing revision number after every write so that all
+  // read providers (history, insights) can react without manual invalidation.
+  int _revision = 0;
+  final _changesController = StreamController<int>.broadcast();
+  Stream<int> get changes => _changesController.stream;
+  void _bump() => _changesController.add(++_revision);
+
+  /// Builds the meal row map, recomputing denormalised macro totals from the
+  /// items when items are present. Meals without items (e.g. recipe portions)
+  /// keep whatever totals the caller set on the [Meal].
+  Map<String, dynamic> _mealMap(Meal meal) {
+    final map = meal.toMap();
+    if (meal.items.isNotEmpty) {
+      final macros = Meal.sumItemMacros(meal.items);
+      map['total_protein_g'] = macros.protein;
+      map['total_carbs_g'] = macros.carbs;
+      map['total_fat_g'] = macros.fat;
+    }
+    return map;
+  }
+
   Future<int> insertMeal(Meal meal) async {
     final db = await AppDatabase.mealsDb;
-    final mealId = await db.insert('meals', meal.toMap());
-    for (var i = 0; i < meal.items.length; i++) {
-      final item = meal.items[i].copyWith(mealId: mealId, sortOrder: i);
-      await db.insert('meal_items', item.toMap());
-    }
-    await db.execute(
-      "INSERT INTO meals_fts(rowid, name, notes) VALUES (?, ?, ?)",
-      [mealId, meal.name, meal.notes],
-    );
-    return mealId;
+    final id = await db.transaction((txn) async {
+      final mealId = await txn.insert('meals', _mealMap(meal));
+      if (meal.items.isNotEmpty) {
+        final batch = txn.batch();
+        for (var i = 0; i < meal.items.length; i++) {
+          batch.insert('meal_items', meal.items[i].copyWith(mealId: mealId, sortOrder: i).toMap());
+        }
+        await batch.commit(noResult: true);
+      }
+      if (AppDatabase.hasFts) {
+        await txn.execute(
+          "INSERT INTO meals_fts(rowid, name, notes) VALUES (?, ?, ?)",
+          [mealId, meal.name, meal.notes],
+        );
+      }
+      return mealId;
+    });
+    _bump();
+    return id;
   }
 
   Future<void> updateMeal(Meal meal) async {
     final db = await AppDatabase.mealsDb;
-    await db.update('meals', meal.toMap(), where: 'id = ?', whereArgs: [meal.id]);
-    await db.delete('meal_items', where: 'meal_id = ?', whereArgs: [meal.id]);
-    for (var i = 0; i < meal.items.length; i++) {
-      final item = meal.items[i].copyWith(mealId: meal.id, sortOrder: i);
-      await db.insert('meal_items', item.toMap());
-    }
-    await db.execute(
-      "INSERT OR REPLACE INTO meals_fts(rowid, name, notes) VALUES (?, ?, ?)",
-      [meal.id, meal.name, meal.notes],
-    );
+    await db.transaction((txn) async {
+      await txn.update('meals', _mealMap(meal), where: 'id = ?', whereArgs: [meal.id]);
+      await txn.delete('meal_items', where: 'meal_id = ?', whereArgs: [meal.id]);
+      if (meal.items.isNotEmpty) {
+        final batch = txn.batch();
+        for (var i = 0; i < meal.items.length; i++) {
+          batch.insert('meal_items', meal.items[i].copyWith(mealId: meal.id, sortOrder: i).toMap());
+        }
+        await batch.commit(noResult: true);
+      }
+      if (AppDatabase.hasFts) {
+        await txn.execute(
+          "INSERT OR REPLACE INTO meals_fts(rowid, name, notes) VALUES (?, ?, ?)",
+          [meal.id, meal.name, meal.notes],
+        );
+      }
+    });
+    _bump();
   }
 
   Future<void> deleteMeal(int id) async {
     final db = await AppDatabase.mealsDb;
+    // Resolve photo ref-count outside the transaction (read-only, avoids nesting).
     final rows = await db.query('meals', columns: ['photo_path'], where: 'id = ?', whereArgs: [id]);
     if (rows.isNotEmpty) {
       final path = rows.first['photo_path'] as String;
@@ -50,8 +91,14 @@ class MealsRepository {
         if (f.existsSync()) await f.delete();
       }
     }
-    await db.delete('meals', where: 'id = ?', whereArgs: [id]);
-    await db.execute("DELETE FROM meals_fts WHERE rowid = ?", [id]);
+    await db.transaction((txn) async {
+      await txn.delete('meals', where: 'id = ?', whereArgs: [id]);
+      // meal_items cascade via FK; FTS has no FK so needs explicit removal.
+      if (AppDatabase.hasFts) {
+        await txn.execute("DELETE FROM meals_fts WHERE rowid = ?", [id]);
+      }
+    });
+    _bump();
   }
 
   Future<void> starMeal(int id, {required bool starred}) async {
@@ -62,13 +109,14 @@ class MealsRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
+    _bump();
   }
 
   Future<int> copyMealToToday(Meal original) async {
     final now = DateTime.now();
     late Meal copy;
     switch (original.source) {
-      case 'barcode':
+      case MealSource.barcode:
         copy = Meal(
           createdAt: now,
           photoPath: original.photoPath,
@@ -78,14 +126,15 @@ class MealsRepository {
           utensil: original.utensil,
           modelUsed: original.modelUsed,
           mealType: Meal.detectTypeFromTime(now),
-          source: 'barcode',
+          source: MealSource.barcode,
           barcode: original.barcode,
           priceChf: original.priceChf,
+          totalProteinG: original.totalProteinG,
+          totalCarbsG: original.totalCarbsG,
+          totalFatG: original.totalFatG,
           items: original.items.map((i) => i.copyWith(id: null, mealId: null)).toList(),
         );
-      case 'recipe_portion':
-        // Recompute kcal from current recipe in case it was edited since.
-        // If recipe no longer exists, fall back to original totalKcal.
+      case MealSource.recipePortion:
         copy = Meal(
           createdAt: now,
           photoPath: original.photoPath,
@@ -94,11 +143,14 @@ class MealsRepository {
           utensil: original.utensil,
           modelUsed: original.modelUsed,
           mealType: Meal.detectTypeFromTime(now),
-          source: 'recipe_portion',
+          source: MealSource.recipePortion,
           recipeId: original.recipeId,
           portionG: original.portionG,
+          totalProteinG: original.totalProteinG,
+          totalCarbsG: original.totalCarbsG,
+          totalFatG: original.totalFatG,
         );
-      default: // 'camera'
+      case MealSource.camera:
         copy = Meal(
           createdAt: now,
           photoPath: original.photoPath,
@@ -109,7 +161,10 @@ class MealsRepository {
           scaleConf: original.scaleConf,
           modelUsed: original.modelUsed,
           mealType: Meal.detectTypeFromTime(now),
-          source: 'camera',
+          source: MealSource.camera,
+          totalProteinG: original.totalProteinG,
+          totalCarbsG: original.totalCarbsG,
+          totalFatG: original.totalFatG,
           items: original.items.map((i) => i.copyWith(id: null, mealId: null)).toList(),
         );
     }
@@ -176,13 +231,29 @@ class MealsRepository {
       offset: offset,
     );
 
-    final meals = <Meal>[];
-    for (final row in rows) {
-      final id = row['id'] as int;
-      final items = await _getItems(id);
-      meals.add(Meal.fromMap(row, items: items));
+    return _hydrateMeals(db, rows);
+  }
+
+  // Fetches items for a list of meal rows in a single IN query, then zips them.
+  Future<List<Meal>> _hydrateMeals(dynamic db, List<Map<String, dynamic>> rows) async {
+    if (rows.isEmpty) return [];
+    final ids = rows.map((r) => r['id'] as int).toList();
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final itemRows = await db.rawQuery(
+      'SELECT * FROM meal_items WHERE meal_id IN ($placeholders) ORDER BY sort_order ASC',
+      ids,
+    ) as List<Map<String, dynamic>>;
+
+    final itemsByMeal = <int, List<MealItem>>{};
+    for (final row in itemRows) {
+      final mid = row['meal_id'] as int;
+      (itemsByMeal[mid] ??= []).add(MealItem.fromMap(row));
     }
-    return meals;
+
+    return rows.map((row) {
+      final id = row['id'] as int;
+      return Meal.fromMap(row, items: itemsByMeal[id] ?? []);
+    }).toList();
   }
 
   /// Returns the last [limit] distinct meal names (non-pending), most recent first.
@@ -211,14 +282,25 @@ class MealsRepository {
     final db = await AppDatabase.mealsDb;
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
-    final end = DateTime(now.year, now.month, now.day, 23, 59, 59).millisecondsSinceEpoch;
+    final end = DateTime(now.year, now.month, now.day + 1).millisecondsSinceEpoch;
     final rows = await db.query(
       'meals',
       columns: ['name'],
-      where: 'created_at BETWEEN ? AND ? AND pending = 0 AND name IS NOT NULL',
+      where: 'created_at >= ? AND created_at < ? AND pending = 0 AND name IS NOT NULL',
       whereArgs: [start, end],
     );
     return rows.map((r) => r['name'] as String).toSet();
+  }
+
+  // Wraps each whitespace-separated token in double-quotes for FTS4 MATCH.
+  // Prevents SqliteException on inputs with unbalanced quotes or operators.
+  String _sanitizeFtsQuery(String q) {
+    return q
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .map((t) => '"${t.replaceAll('"', '""')}"')
+        .join(' ');
   }
 
   Future<List<Meal>> _searchMeals(String query,
@@ -226,27 +308,25 @@ class MealsRepository {
     final db = await AppDatabase.mealsDb;
     final ftsRows = await db.rawQuery(
       "SELECT rowid FROM meals_fts WHERE meals_fts MATCH ? LIMIT ? OFFSET ?",
-      [query, limit, offset],
+      [_sanitizeFtsQuery(query), limit, offset],
     );
     final ids = ftsRows.map((r) => r['rowid'] as int).toList();
     if (ids.isEmpty) return [];
-    final meals = <Meal>[];
-    for (final id in ids) {
-      final meal = await getMeal(id);
-      if (meal != null) meals.add(meal);
-    }
-    return meals;
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final mealRows = await db.rawQuery(
+      'SELECT * FROM meals WHERE id IN ($placeholders)',
+      ids,
+    ) as List<Map<String, dynamic>>;
+    return _hydrateMeals(db, mealRows);
   }
 
   Future<double> getDayTotalKcal(DateTime day) async {
     final db = await AppDatabase.mealsDb;
-    final start =
-        DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
-    final end =
-        DateTime(day.year, day.month, day.day, 23, 59, 59).millisecondsSinceEpoch;
+    final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
+    final end = DateTime(day.year, day.month, day.day + 1).millisecondsSinceEpoch;
     final result = await db.rawQuery(
       'SELECT SUM(total_kcal) as total FROM meals '
-      'WHERE created_at BETWEEN ? AND ? AND pending = 0',
+      'WHERE created_at >= ? AND created_at < ? AND pending = 0',
       [start, end],
     );
     return (result.first['total'] as num?)?.toDouble() ?? 0.0;
@@ -254,48 +334,89 @@ class MealsRepository {
 
   /// Returns kcal totals for the last 7 days, index 0 = 6 days ago, index 6 = today.
   Future<List<double>> getWeeklyKcal() async {
+    final db = await AppDatabase.mealsDb;
     final today = DateTime.now();
-    final results = <double>[];
-    for (var i = 6; i >= 0; i--) {
-      final day = DateTime(today.year, today.month, today.day)
-          .subtract(Duration(days: i));
-      results.add(await getDayTotalKcal(day));
-    }
-    return results;
+    final weekStart = DateTime(today.year, today.month, today.day)
+        .subtract(const Duration(days: 6));
+    final cutoff = weekStart.millisecondsSinceEpoch;
+    final end = DateTime(today.year, today.month, today.day + 1).millisecondsSinceEpoch;
+
+    final rows = await db.rawQuery(
+      "SELECT strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch', 'localtime')) as day, "
+      "SUM(total_kcal) as total FROM meals "
+      "WHERE created_at >= ? AND created_at < ? AND pending = 0 "
+      "GROUP BY day",
+      [cutoff, end],
+    );
+
+    final byDay = <String, double>{
+      for (final r in rows)
+        r['day'] as String: (r['total'] as num).toDouble(),
+    };
+
+    String fmt(DateTime d) =>
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+    return List.generate(7, (i) {
+      final day = weekStart.add(Duration(days: i));
+      return byDay[fmt(day)] ?? 0.0;
+    });
   }
 
   /// Exports all analyzed meals to a CSV file in the temp directory.
   /// Returns the file path for sharing.
   Future<String> exportCsv() async {
     final db = await AppDatabase.mealsDb;
-    final rows = await db.query(
-      'meals',
-      where: 'pending = 0',
-      orderBy: 'created_at ASC',
+
+    // Single JOIN — avoids N+1 item queries.
+    final rows = await db.rawQuery(
+      'SELECT m.id, m.created_at, m.meal_type, m.total_kcal, m.utensil, '
+      'm.starred, m.source, '
+      'i.name as item_name, i.weight_g, i.total_kcal as item_kcal '
+      'FROM meals m '
+      'LEFT JOIN meal_items i ON i.meal_id = m.id '
+      'WHERE m.pending = 0 '
+      'ORDER BY m.created_at ASC, i.sort_order ASC',
     );
+
+    // Group items by meal id.
+    final mealOrder = <int>[];
+    final mealRows = <int, Map<String, dynamic>>{};
+    final mealItems = <int, List<String>>{};
+
+    for (final row in rows) {
+      final id = row['id'] as int;
+      if (!mealRows.containsKey(id)) {
+        mealOrder.add(id);
+        mealRows[id] = row;
+        mealItems[id] = [];
+      }
+      if (row['item_name'] != null) {
+        final name = csvSafe(row['item_name'] as String);
+        final g = (row['weight_g'] as num).round();
+        final kcal = (row['item_kcal'] as num).round();
+        mealItems[id]!.add('$name: ${g}g ${kcal}kcal');
+      }
+    }
 
     final dateFmt = DateFormat('yyyy-MM-dd');
     final timeFmt = DateFormat('HH:mm');
     final buf = StringBuffer();
     buf.writeln('Date,Time,Meal Type,Total kcal,Utensil,Starred,Source,Items');
 
-    for (final row in rows) {
-      final meal = Meal.fromMap(row);
-      final items = await _getItems(meal.id!);
-      final itemsStr = items
-          .map((i) =>
-              '${i.name}: ${i.weightG.round()}g ${i.totalKcal.round()}kcal')
-          .join('; ');
-      final escapedItems = itemsStr.replaceAll('"', '""');
+    for (final id in mealOrder) {
+      final row = mealRows[id]!;
+      final createdAt = DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int);
+      final itemsStr = mealItems[id]!.join('; ').replaceAll('"', '""');
       buf.writeln(
-        '${dateFmt.format(meal.createdAt)},'
-        '${timeFmt.format(meal.createdAt)},'
-        '${meal.mealType ?? ''},'
-        '${meal.totalKcal.round()},'
-        '${meal.utensil},'
-        '${meal.starred ? '1' : '0'},'
-        '${meal.source},'
-        '"$escapedItems"',
+        '${dateFmt.format(createdAt)},'
+        '${timeFmt.format(createdAt)},'
+        '${csvSafe(row['meal_type'] as String? ?? '')},'
+        '${(row['total_kcal'] as num).round()},'
+        '${csvSafe(row['utensil'] as String)},'
+        '${(row['starred'] as int? ?? 0) == 1 ? '1' : '0'},'
+        '${csvSafe(row['source'] as String)},'
+        '"$itemsStr"',
       );
     }
 
@@ -306,6 +427,13 @@ class MealsRepository {
     return file.path;
   }
 
+  // Prefixes cell values starting with formula chars to prevent spreadsheet injection.
+  static String csvSafe(String s) =>
+      (s.isNotEmpty &&
+          (s.startsWith('=') || s.startsWith('+') || s.startsWith('-') || s.startsWith('@')))
+          ? "'$s"
+          : s;
+
   Future<double> getAvgDailyKcal({int days = 30}) async {
     final db = await AppDatabase.mealsDb;
     final cutoff =
@@ -314,11 +442,34 @@ class MealsRepository {
       "SELECT AVG(daily_total) as avg FROM ("
       "  SELECT SUM(total_kcal) as daily_total FROM meals"
       "  WHERE created_at >= ? AND pending = 0"
-      "  GROUP BY strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch'))"
+      "  GROUP BY strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch', 'localtime'))"
       ")",
       [cutoff],
     );
     return (result.first['avg'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  /// Average daily macro totals (grams) over the last [days]. Each macro is
+  /// the mean of per-day sums; null when no meal in the window carries it.
+  Future<({double? protein, double? carbs, double? fat})> getAvgDailyMacros(
+      {int days = 7}) async {
+    final db = await AppDatabase.mealsDb;
+    final cutoff =
+        DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+    final result = await db.rawQuery(
+      "SELECT AVG(p) as avg_p, AVG(c) as avg_c, AVG(f) as avg_f FROM ("
+      "  SELECT SUM(total_protein_g) as p, SUM(total_carbs_g) as c, SUM(total_fat_g) as f"
+      "  FROM meals WHERE created_at >= ? AND pending = 0"
+      "  GROUP BY strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch', 'localtime'))"
+      ")",
+      [cutoff],
+    );
+    final row = result.first;
+    return (
+      protein: (row['avg_p'] as num?)?.toDouble(),
+      carbs: (row['avg_c'] as num?)?.toDouble(),
+      fat: (row['avg_f'] as num?)?.toDouble(),
+    );
   }
 
   Future<List<({String name, int count, double avgKcal})>> getTopMeals(
@@ -343,7 +494,7 @@ class MealsRepository {
   Future<int> getCurrentStreak() async {
     final db = await AppDatabase.mealsDb;
     final rows = await db.rawQuery(
-      "SELECT DISTINCT strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch')) as day "
+      "SELECT DISTINCT strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch', 'localtime')) as day "
       "FROM meals WHERE pending = 0 ORDER BY day DESC LIMIT 365",
     );
     if (rows.isEmpty) return 0;
@@ -376,7 +527,7 @@ class MealsRepository {
       "SELECT COUNT(*) as cnt FROM ("
       "  SELECT SUM(total_kcal) as daily_total FROM meals"
       "  WHERE created_at >= ? AND pending = 0"
-      "  GROUP BY strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch'))"
+      "  GROUP BY strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch', 'localtime'))"
       "  HAVING daily_total > ?"
       ")",
       [cutoff, goalKcal],
@@ -389,7 +540,7 @@ class MealsRepository {
     final cutoff =
         DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
     final result = await db.rawQuery(
-      "SELECT COUNT(DISTINCT strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch'))) as cnt "
+      "SELECT COUNT(DISTINCT strftime('%Y-%m-%d', datetime(created_at / 1000, 'unixepoch', 'localtime'))) as cnt "
       "FROM meals WHERE created_at >= ? AND pending = 0",
       [cutoff],
     );

@@ -15,7 +15,8 @@
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Measure-Object)",
       "Bash(Select-Object -ExpandProperty Count)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(flutter test *)"
     ]
   }
 }

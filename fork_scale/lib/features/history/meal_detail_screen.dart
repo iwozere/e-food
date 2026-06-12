@@ -8,6 +8,7 @@ import '../../core/services/gemini_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/analysis_result.dart';
+import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/recipe.dart';
 
@@ -50,12 +51,12 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     try {
       final imageService = ref.read(imageServiceProvider);
       final lengths = await ref.read(utensilLengthsProvider.future);
-      final lengthCm = lengths[meal.utensil] ?? 18.5;
+      final lengthCm = lengths[meal.utensil.name] ?? 18.5;
       final apiBytes = await imageService.resizeForApi(File(meal.photoPath));
 
       final result = await gemini.analyzeImage(
         imageBytes: apiBytes,
-        utensil: meal.utensil,
+        utensil: meal.utensil.name,
         utensilLengthCm: lengthCm,
       );
 
@@ -69,7 +70,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
           totalKcal: result.totalKcal,
           notes: result.notes,
           photoPath: meal.photoPath,
-          utensil: meal.utensil,
+          utensil: meal.utensil.name,
           pendingMealId: meal.id,
           capturedAt: meal.createdAt,
         ),
@@ -123,7 +124,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
           if (meal != null && !meal.pending) ...[
-            if (meal.source != 'recipe_portion')
+            if (meal.source != MealSource.recipePortion)
               IconButton(
                 icon: const Icon(Icons.edit_outlined),
                 tooltip: 'Edit meal',
@@ -157,7 +158,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                     analyzing: _analyzing,
                     onAnalyze: () => _analyzeNow(meal),
                   )
-                : meal.source == 'recipe_portion'
+                : meal.source == MealSource.recipePortion
                     ? _RecipePortionDetail(
                         meal: meal,
                         onCopy: () => _copyToToday(meal),
@@ -274,15 +275,14 @@ class _MealDetail extends StatelessWidget {
                       label: '${meal.totalKcal.round()} kcal',
                       color: AppColors.accent,
                     ),
-                    if (meal.source == 'barcode')
+                    if (meal.source == MealSource.barcode)
                       const _InfoChip(label: '🔖 Barcode', color: AppColors.primary)
                     else
                       _InfoChip(
                         label: switch (meal.utensil) {
-                          'fork' => '🍴 Fork',
-                          'knife' => '🔪 Knife',
-                          'spoon' => '🥄 Spoon',
-                          _ => meal.utensil,
+                          Utensil.fork => 'Fork',
+                          Utensil.knife => '🔪 Knife',
+                          Utensil.spoon => '🥄 Spoon',
                         },
                         color: AppColors.primary,
                       ),
@@ -306,6 +306,13 @@ class _MealDetail extends StatelessWidget {
             ),
           ),
         ),
+        SliverToBoxAdapter(
+          child: _MacroBreakdown(
+            protein: meal.totalProteinG,
+            carbs: meal.totalCarbsG,
+            fat: meal.totalFatG,
+          ),
+        ),
         const SliverToBoxAdapter(
           child: Padding(
             padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
@@ -319,10 +326,21 @@ class _MealDetail extends StatelessWidget {
           itemCount: meal.items.length,
           itemBuilder: (context, i) {
             final item = meal.items[i];
+            final macroLine = _macroLine(
+                item.totalProteinG, item.totalCarbsG, item.totalFatG);
             return ListTile(
               title: Text(item.name),
-              subtitle: Text(
-                  '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                  if (macroLine != null)
+                    Text(macroLine,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.subtle)),
+                ],
+              ),
               trailing: Text(
                 '${item.totalKcal.round()} kcal',
                 style: const TextStyle(
@@ -414,6 +432,13 @@ class _RecipePortionDetail extends ConsumerWidget {
             ),
           ),
         ),
+        SliverToBoxAdapter(
+          child: _MacroBreakdown(
+            protein: meal.totalProteinG,
+            carbs: meal.totalCarbsG,
+            fat: meal.totalFatG,
+          ),
+        ),
         if (recipe != null) ...[
           const SliverToBoxAdapter(
             child: Padding(
@@ -426,10 +451,21 @@ class _RecipePortionDetail extends ConsumerWidget {
             itemCount: recipe.items.length,
             itemBuilder: (context, i) {
               final item = recipe.items[i];
+              final macroLine = _macroLine(
+                  item.totalProteinG, item.totalCarbsG, item.totalFatG);
               return ListTile(
                 title: Text(item.name),
-                subtitle: Text(
-                    '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                    if (macroLine != null)
+                      Text(macroLine,
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.subtle)),
+                  ],
+                ),
                 trailing: Text('${item.totalKcal.round()} kcal',
                     style: const TextStyle(
                         color: AppColors.accent, fontWeight: FontWeight.bold)),
@@ -483,12 +519,15 @@ class _PhotoHeader extends StatelessWidget {
     return SizedBox(
       height: 240,
       width: double.infinity,
-      child: file.existsSync()
-          ? Image.file(file, fit: BoxFit.cover)
-          : Container(
-              color: AppColors.primary.withValues(alpha: 0.1),
-              child: const Icon(Icons.restaurant, size: 64, color: AppColors.primary),
-            ),
+      child: Image.file(
+        file,
+        fit: BoxFit.cover,
+        cacheWidth: 800,
+        errorBuilder: (_, _, _) => Container(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          child: const Icon(Icons.restaurant, size: 64, color: AppColors.primary),
+        ),
+      ),
     );
   }
 }
@@ -515,10 +554,89 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-String _mealTypeLabel(String? type) => switch (type) {
-      'breakfast' => 'Breakfast',
-      'lunch' => 'Lunch',
-      'dinner' => 'Dinner',
-      'snack' => 'Snack',
-      _ => '',
+// Macro breakdown card shown between the header chips and the ingredient list.
+class _MacroBreakdown extends StatelessWidget {
+  final double? protein;
+  final double? carbs;
+  final double? fat;
+  const _MacroBreakdown({this.protein, this.carbs, this.fat});
+
+  bool get _hasAny => protein != null || carbs != null || fat != null;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_hasAny) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Macros',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+                child: _MacroBox(
+                    label: 'Protein', value: protein, color: AppColors.primary)),
+            const SizedBox(width: 10),
+            Expanded(
+                child: _MacroBox(
+                    label: 'Carbs', value: carbs, color: AppColors.accent)),
+            const SizedBox(width: 10),
+            Expanded(
+                child: _MacroBox(
+                    label: 'Fat', value: fat, color: AppColors.error)),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+class _MacroBox extends StatelessWidget {
+  final String label;
+  final double? value;
+  final Color color;
+  const _MacroBox(
+      {required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 11, color: color)),
+          const SizedBox(height: 4),
+          Text(
+            value != null ? '${value!.round()} g' : '—',
+            style: TextStyle(
+                fontSize: 20, fontWeight: FontWeight.bold, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Compact "P 18 g · C 90 g · F 12 g" line for an item's macro totals.
+String? _macroLine(double? protein, double? carbs, double? fat) {
+  final parts = <String>[];
+  if (protein != null) parts.add('P ${protein.round()} g');
+  if (carbs != null) parts.add('C ${carbs.round()} g');
+  if (fat != null) parts.add('F ${fat.round()} g');
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
+String _mealTypeLabel(MealType? type) => switch (type) {
+      MealType.breakfast => 'Breakfast',
+      MealType.lunch => 'Lunch',
+      MealType.dinner => 'Dinner',
+      MealType.snack => 'Snack',
+      null => '',
     };

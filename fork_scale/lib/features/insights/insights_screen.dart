@@ -16,6 +16,16 @@ final _avgKcal30Provider = FutureProvider.autoDispose<double>(
   (ref) => ref.read(mealsRepositoryProvider).getAvgDailyKcal(days: 30),
 );
 
+typedef _Macros = ({double? protein, double? carbs, double? fat});
+
+final _avgMacros7Provider = FutureProvider.autoDispose<_Macros>(
+  (ref) => ref.read(mealsRepositoryProvider).getAvgDailyMacros(days: 7),
+);
+
+final _avgMacros30Provider = FutureProvider.autoDispose<_Macros>(
+  (ref) => ref.read(mealsRepositoryProvider).getAvgDailyMacros(days: 30),
+);
+
 final _topMealsProvider =
     FutureProvider.autoDispose<List<({String name, int count, double avgKcal})>>(
   (ref) => ref.read(mealsRepositoryProvider).getTopMeals(limit: 5),
@@ -41,6 +51,8 @@ class InsightsScreen extends ConsumerWidget {
     final topMeals = ref.watch(_topMealsProvider).valueOrNull ?? [];
     final daysOver = ref.watch(_daysOverGoalProvider).valueOrNull;
     final daysLogged = ref.watch(_daysWithMealsProvider).valueOrNull;
+    final macros7 = ref.watch(_avgMacros7Provider).valueOrNull;
+    final macros30 = ref.watch(_avgMacros30Provider).valueOrNull;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Insights')),
@@ -109,6 +121,25 @@ class InsightsScreen extends ConsumerWidget {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+
+          // Average daily macros
+          if (_hasAnyMacro(macros7) || _hasAnyMacro(macros30))
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _SectionLabel('AVERAGE DAILY MACROS'),
+                    const SizedBox(height: 12),
+                    _MacroRow(label: 'Last 7 days', macros: macros7),
+                    const SizedBox(height: 10),
+                    _MacroRow(label: 'Last 30 days', macros: macros30),
+                  ],
+                ),
+              ),
+            ),
           const SizedBox(height: 12),
 
           // This week
@@ -208,6 +239,50 @@ class InsightsScreen extends ConsumerWidget {
           const SizedBox(height: 32),
         ],
       ),
+    );
+  }
+}
+
+bool _hasAnyMacro(_Macros? m) =>
+    m != null && (m.protein != null || m.carbs != null || m.fat != null);
+
+class _MacroRow extends StatelessWidget {
+  final String label;
+  final _Macros? macros;
+  const _MacroRow({required this.label, required this.macros});
+
+  String _g(double? v) => v != null ? '${v.round()} g' : '—';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: AppColors.subtle)),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: _StatBox(
+                  label: 'Protein',
+                  value: _g(macros?.protein),
+                  color: AppColors.primary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatBox(label: 'Carbs', value: _g(macros?.carbs)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatBox(
+                  label: 'Fat',
+                  value: _g(macros?.fat),
+                  color: AppColors.error),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

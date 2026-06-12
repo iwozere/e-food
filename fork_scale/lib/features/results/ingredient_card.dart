@@ -26,6 +26,13 @@ class _IngredientCardState extends State<IngredientCard> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _weightCtrl;
   late final TextEditingController _kcalCtrl;
+  late final TextEditingController _proteinCtrl;
+  late final TextEditingController _carbsCtrl;
+  late final TextEditingController _fatCtrl;
+  late bool _macrosExpanded;
+
+  static String _fmt(double? v) =>
+      v == null ? '' : (v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString());
 
   @override
   void initState() {
@@ -33,6 +40,24 @@ class _IngredientCardState extends State<IngredientCard> {
     _nameCtrl = TextEditingController(text: widget.item.name);
     _weightCtrl = TextEditingController(text: widget.item.weightG.toStringAsFixed(0));
     _kcalCtrl = TextEditingController(text: widget.item.kcalPer100g.toStringAsFixed(0));
+    _proteinCtrl = TextEditingController(text: _fmt(widget.item.proteinPer100g));
+    _carbsCtrl = TextEditingController(text: _fmt(widget.item.carbsPer100g));
+    _fatCtrl = TextEditingController(text: _fmt(widget.item.fatPer100g));
+    _macrosExpanded = widget.item.proteinPer100g != null ||
+        widget.item.carbsPer100g != null ||
+        widget.item.fatPer100g != null;
+  }
+
+  @override
+  void didUpdateWidget(IngredientCard old) {
+    super.didUpdateWidget(old);
+    final n = widget.item;
+    if (n.name != old.item.name) _nameCtrl.text = n.name;
+    if (n.weightG != old.item.weightG) _weightCtrl.text = n.weightG.toStringAsFixed(0);
+    if (n.kcalPer100g != old.item.kcalPer100g) _kcalCtrl.text = n.kcalPer100g.toStringAsFixed(0);
+    if (n.proteinPer100g != old.item.proteinPer100g) _proteinCtrl.text = _fmt(n.proteinPer100g);
+    if (n.carbsPer100g != old.item.carbsPer100g) _carbsCtrl.text = _fmt(n.carbsPer100g);
+    if (n.fatPer100g != old.item.fatPer100g) _fatCtrl.text = _fmt(n.fatPer100g);
   }
 
   @override
@@ -40,10 +65,31 @@ class _IngredientCardState extends State<IngredientCard> {
     _nameCtrl.dispose();
     _weightCtrl.dispose();
     _kcalCtrl.dispose();
+    _proteinCtrl.dispose();
+    _carbsCtrl.dispose();
+    _fatCtrl.dispose();
     super.dispose();
   }
 
   MealItem get _current => widget.item;
+
+  // Rebuilds the item from the macro controllers. Built explicitly (not via
+  // copyWith) so a cleared field becomes null ("unknown") rather than sticking.
+  void _emitMacros() {
+    widget.onChanged(MealItem(
+      id: _current.id,
+      mealId: _current.mealId,
+      name: _current.name,
+      weightG: _current.weightG,
+      kcalPer100g: _current.kcalPer100g,
+      totalKcal: _current.totalKcal,
+      sortOrder: _current.sortOrder,
+      usdaMatched: _current.usdaMatched,
+      proteinPer100g: double.tryParse(_proteinCtrl.text),
+      carbsPer100g: double.tryParse(_carbsCtrl.text),
+      fatPer100g: double.tryParse(_fatCtrl.text),
+    ));
+  }
 
   void _onNameChanged(String v) =>
       widget.onChanged(_current.copyWith(name: v));
@@ -155,6 +201,55 @@ class _IngredientCardState extends State<IngredientCard> {
               ],
             ),
             const SizedBox(height: 8),
+            // Macros (per 100g) — collapsible, optional
+            InkWell(
+              onTap: () => setState(() => _macrosExpanded = !_macrosExpanded),
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      _macrosExpanded
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_right,
+                      size: 18,
+                      color: AppColors.subtle,
+                    ),
+                    const SizedBox(width: 2),
+                    const Text('Macros (per 100g)',
+                        style: TextStyle(fontSize: 12, color: AppColors.subtle)),
+                  ],
+                ),
+              ),
+            ),
+            if (_macrosExpanded)
+              Row(children: [
+                Expanded(
+                  child: _LabeledField(
+                    label: 'Protein (g)',
+                    controller: _proteinCtrl,
+                    onChanged: (_) => _emitMacros(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _LabeledField(
+                    label: 'Carbs (g)',
+                    controller: _carbsCtrl,
+                    onChanged: (_) => _emitMacros(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _LabeledField(
+                    label: 'Fat (g)',
+                    controller: _fatCtrl,
+                    onChanged: (_) => _emitMacros(),
+                  ),
+                ),
+              ]),
+            const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
               child: Text(
@@ -212,9 +307,12 @@ class _StepButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Icon(icon, size: 18, color: AppColors.primary),
+    return IconButton(
+      icon: Icon(icon, size: 18, color: AppColors.primary),
+      onPressed: onTap,
+      tooltip: icon == Icons.add ? 'Increase weight by 10g' : 'Decrease weight by 10g',
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
     );
   }
 }

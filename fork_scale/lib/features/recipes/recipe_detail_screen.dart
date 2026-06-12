@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/recipe.dart';
+import '../../models/recipe_item.dart';
 import 'log_portion_sheet.dart';
 
 final _recipeProvider = FutureProvider.autoDispose.family<Recipe?, int>(
@@ -102,6 +103,21 @@ class _RecipeDetail extends StatelessWidget {
                     label: 'Yield: ${recipe.yieldG.round()} g',
                     color: AppColors.primary,
                   ),
+                  if (recipe.totalProteinG != null)
+                    _Chip(
+                      label: 'P ${recipe.totalProteinG!.round()} g',
+                      color: AppColors.primary,
+                    ),
+                  if (recipe.totalCarbsG != null)
+                    _Chip(
+                      label: 'C ${recipe.totalCarbsG!.round()} g',
+                      color: AppColors.primary,
+                    ),
+                  if (recipe.totalFatG != null)
+                    _Chip(
+                      label: 'F ${recipe.totalFatG!.round()} g',
+                      color: AppColors.primary,
+                    ),
                 ]),
                 if (recipe.notes != null && recipe.notes!.isNotEmpty) ...[
                   const SizedBox(height: 12),
@@ -124,10 +140,20 @@ class _RecipeDetail extends StatelessWidget {
           itemCount: recipe.items.length,
           itemBuilder: (context, i) {
             final item = recipe.items[i];
+            final macroLine = _macroLine(item);
             return ListTile(
               title: Text(item.name),
-              subtitle: Text(
-                  '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                  if (macroLine != null)
+                    Text(macroLine,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.subtle)),
+                ],
+              ),
               trailing: Text(
                 '${item.totalKcal.round()} kcal',
                 style: const TextStyle(
@@ -165,6 +191,16 @@ class _RecipeDetail extends StatelessWidget {
   }
 }
 
+// Compact "P 18 g · C 90 g · F 12 g" line for an ingredient's macro totals.
+// Returns null when the item carries no macro data.
+String? _macroLine(RecipeItem item) {
+  final parts = <String>[];
+  if (item.totalProteinG != null) parts.add('P ${item.totalProteinG!.round()} g');
+  if (item.totalCarbsG != null) parts.add('C ${item.totalCarbsG!.round()} g');
+  if (item.totalFatG != null) parts.add('F ${item.totalFatG!.round()} g');
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
 class _PhotoHeader extends StatelessWidget {
   final String path;
   const _PhotoHeader({required this.path});
@@ -175,13 +211,15 @@ class _PhotoHeader extends StatelessWidget {
     return SizedBox(
       height: 220,
       width: double.infinity,
-      child: f.existsSync()
-          ? Image.file(f, fit: BoxFit.cover)
-          : Container(
-              color: AppColors.primary.withValues(alpha: 0.1),
-              child: const Center(
-                  child: Text('🍳', style: TextStyle(fontSize: 64))),
-            ),
+      child: Image.file(
+        f,
+        fit: BoxFit.cover,
+        cacheWidth: 800,
+        errorBuilder: (_, _, _) => Container(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          child: const Center(child: Text('🍳', style: TextStyle(fontSize: 64))),
+        ),
+      ),
     );
   }
 }

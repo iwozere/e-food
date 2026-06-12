@@ -8,6 +8,7 @@ typedef MealsFilter = ({String? query, DateTime? day, bool starredOnly, String? 
 final historyMealsProvider =
     FutureProvider.autoDispose.family<List<Meal>, MealsFilter>(
   (ref, filter) {
+    ref.watch(mealsChangesProvider); // auto-refetch on any write
     final day = filter.day;
     return ref.read(mealsRepositoryProvider).getMeals(
           searchQuery: filter.query,
@@ -22,9 +23,11 @@ final historyMealsProvider =
 );
 
 final historyDayTotalProvider = FutureProvider.autoDispose<double>((ref) {
+  ref.watch(mealsChangesProvider);
   return ref.read(mealsRepositoryProvider).getDayTotalKcal(DateTime.now());
 });
 
 final historyWeeklyKcalProvider = FutureProvider.autoDispose<List<double>>((ref) {
+  ref.watch(mealsChangesProvider);
   return ref.read(mealsRepositoryProvider).getWeeklyKcal();
 });
