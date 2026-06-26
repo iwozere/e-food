@@ -154,7 +154,7 @@ Entry points: barcode icon on Capture screen; "Add ingredient → Scan barcode" 
 
 ### 4.7 Settings Tab
 
-- **Gemini API key** — enter / update (stored in SharedPreferences; one-time migration from FlutterSecureStorage)
+- **Gemini API key** — enter / update (stored in `FlutterSecureStorage`; one-time migration from any legacy plaintext-`SharedPreferences` copy)
 - **Daily calorie goal** — number input (default 2000 kcal)
 - **Default utensil** — fork / knife / spoon
 - **Utensil lengths** — configurable per utensil in cm (used in Gemini prompt)
@@ -321,10 +321,12 @@ History → tap tile → Meal Detail → [✏] edit icon
 ## 8. Privacy & Security
 
 - No analytics, no crash reporters, no telemetry, no third-party SDKs beyond those listed
-- Gemini API key stored in OS secure enclave (Keychain on iOS, EncryptedSharedPreferences on Android)
+- Gemini API key stored in `FlutterSecureStorage` (Keychain on iOS, EncryptedSharedPreferences on Android) — encrypted at rest, not readable as plaintext XML. A one-time migration moves any key left in `SharedPreferences` by an earlier build into secure storage and deletes the plaintext copy; the migration runs on first read of `geminiApiKeyProvider`, so it applies even if the user never opens Settings. Off-device exposure is further mitigated by `android:allowBackup="false"` + `dataExtractionRules`.
 - All data (meals, photos, recipes, cached products) stored locally on-device
 - Outbound calls: Gemini API (image + prompt) and Open Food Facts API (barcode lookup) only
 - Images sent to Google when using Gemini — disclosed in Settings UI
+
+> **Resolved (2026-06-25, T0.2):** The prior plaintext-`SharedPreferences` storage flagged in `docs/review-2026-06-24.md` §6 has been reverted — the key lives in `FlutterSecureStorage` again, with an inverted one-time migration out of plaintext prefs.
 
 ---
 

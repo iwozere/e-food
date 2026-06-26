@@ -7,10 +7,12 @@ import 'package:intl/intl.dart';
 import '../../core/services/gemini_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/analysis_result.dart';
 import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/recipe.dart';
+import '../../widgets/meal_type_label.dart';
 
 final _mealProvider = FutureProvider.autoDispose.family<Meal?, int>(
   (ref, id) => ref.read(mealsRepositoryProvider).getMeal(id),
@@ -33,13 +35,14 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   bool _analyzing = false;
 
   Future<void> _analyzeNow(Meal meal) async {
+    final l = AppLocalizations.of(context);
     final gemini = ref.read(geminiServiceProvider);
     if (gemini == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Gemini API key missing.'),
+          content: Text(l.mealDetailApiKeyMissing),
           action: SnackBarAction(
-            label: 'Settings',
+            label: l.navSettings,
             onPressed: () => context.go('/settings'),
           ),
         ),
@@ -78,21 +81,21 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     } on GeminiRateLimitException {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Rate limit reached — try again in a minute.')),
+          SnackBar(content: Text(l.mealDetailRateLimit)),
         );
       }
     } on GeminiApiException catch (e) {
       if (!mounted) return;
       final msg = (e.statusCode == 503)
-          ? 'Gemini is overloaded — try again in a moment.'
+          ? l.mealDetailOverloaded
           : (e.statusCode == 401 || e.statusCode == 403)
-              ? 'API key invalid — check Settings.'
-              : 'API error (${e.statusCode}).';
+              ? l.mealDetailKeyInvalid
+              : l.captureApiError(e.statusCode);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Analysis failed: $e')),
+          SnackBar(content: Text(l.mealDetailAnalysisFailed('$e'))),
         );
       }
     } finally {
@@ -117,24 +120,25 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   Widget build(BuildContext context) {
     final mealAsync = ref.watch(_mealProvider(widget.mealId));
     final meal = mealAsync.valueOrNull;
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(meal?.pending == true ? 'Pending Meal' : 'Meal Detail'),
+        title: Text(meal?.pending == true ? l.mealDetailPendingTitle : l.mealDetailTitle),
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
           if (meal != null && !meal.pending) ...[
             if (meal.source != MealSource.recipePortion)
               IconButton(
                 icon: const Icon(Icons.edit_outlined),
-                tooltip: 'Edit meal',
+                tooltip: l.mealDetailEditMeal,
                 onPressed: () async {
                   await context.push('/history/${widget.mealId}/edit');
                   if (mounted) ref.invalidate(_mealProvider(widget.mealId));
                 },
               ),
             IconButton(
-              tooltip: meal.starred ? 'Unstar' : 'Star',
+              tooltip: meal.starred ? l.historyUnstar : l.historyStar,
               icon: Icon(meal.starred ? Icons.star : Icons.star_border),
               color: meal.starred ? AppColors.accent : null,
               onPressed: () async {
@@ -149,9 +153,9 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
       ),
       body: mealAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(l.commonError('$e'))),
         data: (meal) => meal == null
-            ? const Center(child: Text('Meal not found'))
+            ? Center(child: Text(l.mealDetailNotFound))
             : meal.pending
                 ? _PendingBody(
                     meal: meal,
@@ -187,6 +191,8 @@ class _PendingBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -198,7 +204,7 @@ class _PendingBody extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  DateFormat('EEEE, MMMM d, y · h:mm a').format(meal.createdAt),
+                  DateFormat('EEEE, MMMM d, y · h:mm a', locale).format(meal.createdAt),
                   style: const TextStyle(color: AppColors.subtle, fontSize: 13),
                 ),
                 if (meal.mealType != null) ...[
@@ -206,16 +212,16 @@ class _PendingBody extends StatelessWidget {
                   Wrap(
                     children: [
                       _InfoChip(
-                        label: _mealTypeLabel(meal.mealType),
+                        label: mealTypeLabel(l, meal.mealType),
                         color: AppColors.accent,
                       ),
                     ],
                   ),
                 ],
                 const SizedBox(height: 16),
-                const Text(
-                  'This photo was saved but not yet analyzed.',
-                  style: TextStyle(color: AppColors.subtle),
+                Text(
+                  l.mealDetailPendingBody,
+                  style: const TextStyle(color: AppColors.subtle),
                 ),
                 const Spacer(),
                 FilledButton.icon(
@@ -228,7 +234,7 @@ class _PendingBody extends StatelessWidget {
                               color: Colors.white, strokeWidth: 2),
                         )
                       : const Icon(Icons.auto_awesome),
-                  label: Text(analyzing ? 'Analyzing…' : 'Analyze now'),
+                  label: Text(analyzing ? l.mealDetailAnalyzing : l.mealDetailAnalyzeNow),
                 ),
               ],
             ),
@@ -248,6 +254,8 @@ class _MealDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _PhotoHeader(path: meal.photoPath)),
@@ -258,12 +266,12 @@ class _MealDetail extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  meal.name ?? _autoName(meal),
+                  meal.name ?? _autoName(l, meal),
                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  DateFormat('EEEE, MMMM d, y · h:mm a').format(meal.createdAt),
+                  DateFormat('EEEE, MMMM d, y · h:mm a', locale).format(meal.createdAt),
                   style: const TextStyle(color: AppColors.subtle, fontSize: 13),
                 ),
                 const SizedBox(height: 12),
@@ -272,28 +280,28 @@ class _MealDetail extends StatelessWidget {
                   runSpacing: 6,
                   children: [
                     _InfoChip(
-                      label: '${meal.totalKcal.round()} kcal',
+                      label: l.kcalValue(meal.totalKcal.round()),
                       color: AppColors.accent,
                     ),
                     if (meal.source == MealSource.barcode)
-                      const _InfoChip(label: '🔖 Barcode', color: AppColors.primary)
+                      _InfoChip(label: '🔖 ${l.sourceBarcode}', color: AppColors.primary)
                     else
                       _InfoChip(
                         label: switch (meal.utensil) {
-                          Utensil.fork => 'Fork',
-                          Utensil.knife => '🔪 Knife',
-                          Utensil.spoon => '🥄 Spoon',
+                          Utensil.fork => l.utensilFork,
+                          Utensil.knife => '🔪 ${l.utensilKnife}',
+                          Utensil.spoon => '🥄 ${l.utensilSpoon}',
                         },
                         color: AppColors.primary,
                       ),
                     if (meal.scaleConf != null)
                       _InfoChip(
-                        label: 'Conf: ${meal.scaleConf}',
+                        label: l.mealDetailConf(_confLevel(l, meal.scaleConf!)),
                         color: _confColor(meal.scaleConf!),
                       ),
                     if (meal.mealType != null)
                       _InfoChip(
-                        label: _mealTypeLabel(meal.mealType),
+                        label: mealTypeLabel(l, meal.mealType),
                         color: AppColors.accent,
                       ),
                   ],
@@ -313,12 +321,12 @@ class _MealDetail extends StatelessWidget {
             fat: meal.totalFatG,
           ),
         ),
-        const SliverToBoxAdapter(
+        SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
             child: Text(
-              'Ingredients',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              l.mealDetailIngredients,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
         ),
@@ -327,14 +335,14 @@ class _MealDetail extends StatelessWidget {
           itemBuilder: (context, i) {
             final item = meal.items[i];
             final macroLine = _macroLine(
-                item.totalProteinG, item.totalCarbsG, item.totalFatG);
+                l, item.totalProteinG, item.totalCarbsG, item.totalFatG);
             return ListTile(
               title: Text(item.name),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                      '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                  Text(l.mealDetailItemSubtitle(
+                      item.weightG.round(), item.kcalPer100g.round())),
                   if (macroLine != null)
                     Text(macroLine,
                         style: const TextStyle(
@@ -342,7 +350,7 @@ class _MealDetail extends StatelessWidget {
                 ],
               ),
               trailing: Text(
-                '${item.totalKcal.round()} kcal',
+                l.kcalValue(item.totalKcal.round()),
                 style: const TextStyle(
                   color: AppColors.accent,
                   fontWeight: FontWeight.bold,
@@ -357,7 +365,7 @@ class _MealDetail extends StatelessWidget {
             child: OutlinedButton.icon(
               onPressed: onCopy,
               icon: const Icon(Icons.copy_outlined),
-              label: const Text('Copy to today'),
+              label: Text(l.historyCopyToToday),
             ),
           ),
         ),
@@ -365,8 +373,8 @@ class _MealDetail extends StatelessWidget {
     );
   }
 
-  String _autoName(Meal meal) {
-    if (meal.items.isEmpty) return 'Meal';
+  String _autoName(AppLocalizations l, Meal meal) {
+    if (meal.items.isEmpty) return l.historyMealFallback;
     final names = meal.items.take(2).map((i) => i.name).join(', ');
     return meal.items.length > 2 ? '$names…' : names;
   }
@@ -375,6 +383,12 @@ class _MealDetail extends StatelessWidget {
         'high' => Colors.green,
         'medium' => Colors.orange,
         _ => Colors.red,
+      };
+
+  String _confLevel(AppLocalizations l, String conf) => switch (conf) {
+        'high' => l.confHigh,
+        'medium' => l.confMedium,
+        _ => l.confLow,
       };
 }
 
@@ -391,6 +405,8 @@ class _RecipePortionDetail extends ConsumerWidget {
         ? ref.watch(_recipeForMealProvider(meal.recipeId!))
         : const AsyncData<Recipe?>(null);
     final recipe = recipeAsync.valueOrNull;
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
 
     return CustomScrollView(
       slivers: [
@@ -402,29 +418,29 @@ class _RecipePortionDetail extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  meal.name ?? 'Recipe meal',
+                  meal.name ?? l.mealDetailRecipeMeal,
                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  DateFormat('EEEE, MMMM d, y · h:mm a').format(meal.createdAt),
+                  DateFormat('EEEE, MMMM d, y · h:mm a', locale).format(meal.createdAt),
                   style: const TextStyle(color: AppColors.subtle, fontSize: 13),
                 ),
                 const SizedBox(height: 12),
                 Wrap(spacing: 8, runSpacing: 6, children: [
                   _InfoChip(
-                    label: '${meal.totalKcal.round()} kcal',
+                    label: l.kcalValue(meal.totalKcal.round()),
                     color: AppColors.accent,
                   ),
                   if (meal.portionG != null)
                     _InfoChip(
-                      label: '${meal.portionG!.round()} g portion',
+                      label: l.mealDetailPortion(meal.portionG!.round()),
                       color: AppColors.primary,
                     ),
-                  const _InfoChip(label: '🍳 Recipe', color: AppColors.primary),
+                  _InfoChip(label: '🍳 ${l.sourceRecipe}', color: AppColors.primary),
                   if (meal.mealType != null)
                     _InfoChip(
-                      label: _mealTypeLabel(meal.mealType),
+                      label: mealTypeLabel(l, meal.mealType),
                       color: AppColors.accent,
                     ),
                 ]),
@@ -440,11 +456,11 @@ class _RecipePortionDetail extends ConsumerWidget {
           ),
         ),
         if (recipe != null) ...[
-          const SliverToBoxAdapter(
+          SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
-              child: Text('Ingredients (from recipe)',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Text(l.mealDetailIngredientsFromRecipe,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ),
           ),
           SliverList.builder(
@@ -452,21 +468,21 @@ class _RecipePortionDetail extends ConsumerWidget {
             itemBuilder: (context, i) {
               final item = recipe.items[i];
               final macroLine = _macroLine(
-                  item.totalProteinG, item.totalCarbsG, item.totalFatG);
+                  l, item.totalProteinG, item.totalCarbsG, item.totalFatG);
               return ListTile(
                 title: Text(item.name),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                        '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                    Text(l.mealDetailItemSubtitle(
+                        item.weightG.round(), item.kcalPer100g.round())),
                     if (macroLine != null)
                       Text(macroLine,
                           style: const TextStyle(
                               fontSize: 12, color: AppColors.subtle)),
                   ],
                 ),
-                trailing: Text('${item.totalKcal.round()} kcal',
+                trailing: Text(l.kcalValue(item.totalKcal.round()),
                     style: const TextStyle(
                         color: AppColors.accent, fontWeight: FontWeight.bold)),
               );
@@ -480,13 +496,13 @@ class _RecipePortionDetail extends ConsumerWidget {
                   onPressed: () =>
                       context.push('/recipes/${recipe.id}'),
                   icon: const Icon(Icons.menu_book, size: 16),
-                  label: const Text('Go to recipe'),
+                  label: Text(l.mealDetailGoToRecipe),
                 ),
                 TextButton.icon(
                   onPressed: () =>
                       context.push('/recipes/${recipe.id}/edit'),
                   icon: const Icon(Icons.edit_outlined, size: 16),
-                  label: const Text('Edit recipe'),
+                  label: Text(l.mealDetailEditRecipe),
                 ),
               ]),
             ),
@@ -498,7 +514,7 @@ class _RecipePortionDetail extends ConsumerWidget {
             child: OutlinedButton.icon(
               onPressed: onCopy,
               icon: const Icon(Icons.copy_outlined),
-              label: const Text('Copy to today'),
+              label: Text(l.historyCopyToToday),
             ),
           ),
         ),
@@ -566,26 +582,27 @@ class _MacroBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!_hasAny) return const SizedBox.shrink();
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Macros',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(l.macros,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
                 child: _MacroBox(
-                    label: 'Protein', value: protein, color: AppColors.primary)),
+                    label: l.macroProtein, value: protein, color: AppColors.primary)),
             const SizedBox(width: 10),
             Expanded(
                 child: _MacroBox(
-                    label: 'Carbs', value: carbs, color: AppColors.accent)),
+                    label: l.macroCarbs, value: carbs, color: AppColors.accent)),
             const SizedBox(width: 10),
             Expanded(
                 child: _MacroBox(
-                    label: 'Fat', value: fat, color: AppColors.error)),
+                    label: l.macroFat, value: fat, color: AppColors.error)),
           ]),
         ],
       ),
@@ -614,7 +631,9 @@ class _MacroBox extends StatelessWidget {
           Text(label, style: TextStyle(fontSize: 11, color: color)),
           const SizedBox(height: 4),
           Text(
-            value != null ? '${value!.round()} g' : '—',
+            value != null
+                ? AppLocalizations.of(context).gramsValue(value!.round())
+                : '—',
             style: TextStyle(
                 fontSize: 20, fontWeight: FontWeight.bold, color: color),
           ),
@@ -625,18 +644,17 @@ class _MacroBox extends StatelessWidget {
 }
 
 // Compact "P 18 g · C 90 g · F 12 g" line for an item's macro totals.
-String? _macroLine(double? protein, double? carbs, double? fat) {
+String? _macroLine(
+    AppLocalizations l, double? protein, double? carbs, double? fat) {
   final parts = <String>[];
-  if (protein != null) parts.add('P ${protein.round()} g');
-  if (carbs != null) parts.add('C ${carbs.round()} g');
-  if (fat != null) parts.add('F ${fat.round()} g');
+  if (protein != null) {
+    parts.add('${l.macroAbbrevProtein} ${l.gramsValue(protein.round())}');
+  }
+  if (carbs != null) {
+    parts.add('${l.macroAbbrevCarbs} ${l.gramsValue(carbs.round())}');
+  }
+  if (fat != null) {
+    parts.add('${l.macroAbbrevFat} ${l.gramsValue(fat.round())}');
+  }
   return parts.isEmpty ? null : parts.join(' · ');
 }
-
-String _mealTypeLabel(MealType? type) => switch (type) {
-      MealType.breakfast => 'Breakfast',
-      MealType.lunch => 'Lunch',
-      MealType.dinner => 'Dinner',
-      MealType.snack => 'Snack',
-      null => '',
-    };

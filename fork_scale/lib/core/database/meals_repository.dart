@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -128,7 +129,6 @@ class MealsRepository {
           mealType: Meal.detectTypeFromTime(now),
           source: MealSource.barcode,
           barcode: original.barcode,
-          priceChf: original.priceChf,
           totalProteinG: original.totalProteinG,
           totalCarbsG: original.totalCarbsG,
           totalFatG: original.totalFatG,
@@ -294,7 +294,8 @@ class MealsRepository {
 
   // Wraps each whitespace-separated token in double-quotes for FTS4 MATCH.
   // Prevents SqliteException on inputs with unbalanced quotes or operators.
-  String _sanitizeFtsQuery(String q) {
+  @visibleForTesting
+  static String sanitizeFtsQuery(String q) {
     return q
         .trim()
         .split(RegExp(r'\s+'))
@@ -308,7 +309,7 @@ class MealsRepository {
     final db = await AppDatabase.mealsDb;
     final ftsRows = await db.rawQuery(
       "SELECT rowid FROM meals_fts WHERE meals_fts MATCH ? LIMIT ? OFFSET ?",
-      [_sanitizeFtsQuery(query), limit, offset],
+      [sanitizeFtsQuery(query), limit, offset],
     );
     final ids = ftsRows.map((r) => r['rowid'] as int).toList();
     if (ids.isEmpty) return [];

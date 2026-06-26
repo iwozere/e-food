@@ -30,13 +30,17 @@ class AppDatabase {
       path,
       version: 8,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
-      onCreate: _createMealsSchema,
+      onCreate: (db, _) => _createSchema(db, withFts: true),
       onUpgrade: _upgradeMealsSchema,
     );
   }
 
-  static Future<void> _createMealsSchema(Database db, int version) async {
-    await db.execute('''
+  // ── Canonical table DDL (single source of truth) ────────────────────────
+  // These constants define the *current* schema and are used both for a fresh
+  // install (_createSchema) and, where the historical migration DDL is
+  // identical, by the upgrade path — so the two cannot silently drift.
+
+  static const String _ddlMeals = '''
       CREATE TABLE meals (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         created_at  INTEGER NOT NULL,
@@ -52,15 +56,16 @@ class AppDatabase {
         starred     INTEGER NOT NULL DEFAULT 0,
         source      TEXT NOT NULL DEFAULT 'camera',
         barcode     TEXT REFERENCES cached_products(barcode),
-        price_chf   REAL,
+        price_chf   REAL, -- deprecated (Pepesto pricing, removed); kept: SQLite < 3.35 can't DROP COLUMN cheaply
         recipe_id   INTEGER REFERENCES recipes(id) ON DELETE SET NULL,
         portion_g   REAL,
         total_protein_g REAL,
         total_carbs_g   REAL,
         total_fat_g     REAL
       )
-    ''');
-    await db.execute('''
+    ''';
+
+  static const String _ddlMealItems = '''
       CREATE TABLE meal_items (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         meal_id       INTEGER NOT NULL REFERENCES meals(id) ON DELETE CASCADE,
@@ -74,8 +79,9 @@ class AppDatabase {
         carbs_per_100g   REAL,
         fat_per_100g     REAL
       )
-    ''');
-    await db.execute('''
+    ''';
+
+  static const String _ddlCachedProducts = '''
       CREATE TABLE cached_products (
         barcode       TEXT PRIMARY KEY,
         name          TEXT NOT NULL,
@@ -89,8 +95,9 @@ class AppDatabase {
         source        TEXT NOT NULL,
         fetched_at    INTEGER NOT NULL
       )
-    ''');
-    await db.execute('''
+    ''';
+
+  static const String _ddlRecipes = '''
       CREATE TABLE recipes (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         name          TEXT NOT NULL,
@@ -101,8 +108,9 @@ class AppDatabase {
         created_at    INTEGER NOT NULL,
         updated_at    INTEGER NOT NULL
       )
-    ''');
-    await db.execute('''
+    ''';
+
+  static const String _ddlRecipeItems = '''
       CREATE TABLE recipe_items (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         recipe_id     INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -117,15 +125,31 @@ class AppDatabase {
         carbs_per_100g   REAL,
         fat_per_100g     REAL
       )
-    ''');
-    await db.execute('CREATE INDEX idx_meals_created ON meals(created_at DESC)');
-    await db.execute('CREATE INDEX idx_cached_products_fetched ON cached_products(fetched_at)');
-    await db.execute('CREATE INDEX idx_recipe_items_recipe ON recipe_items(recipe_id)');
-    await db.execute('CREATE INDEX idx_meals_recipe ON meals(recipe_id)');
-    await db.execute('CREATE INDEX idx_meals_source ON meals(source)');
-    await db.execute(
-      "CREATE VIRTUAL TABLE meals_fts USING fts4(name, notes)",
-    );
+    ''';
+
+  static const List<String> _ddlIndexes = [
+    'CREATE INDEX idx_meals_created ON meals(created_at DESC)',
+    'CREATE INDEX idx_cached_products_fetched ON cached_products(fetched_at)',
+    'CREATE INDEX idx_recipe_items_recipe ON recipe_items(recipe_id)',
+    'CREATE INDEX idx_meals_recipe ON meals(recipe_id)',
+    'CREATE INDEX idx_meals_source ON meals(source)',
+  ];
+
+  /// Builds the full meals schema from scratch. [withFts] adds the FTS4 virtual
+  /// table; it is false under sqflite_common_ffi (unit tests), whose SQLite
+  /// build rarely includes FTS4.
+  static Future<void> _createSchema(Database db, {required bool withFts}) async {
+    await db.execute(_ddlMeals);
+    await db.execute(_ddlMealItems);
+    await db.execute(_ddlCachedProducts);
+    await db.execute(_ddlRecipes);
+    await db.execute(_ddlRecipeItems);
+    for (final idx in _ddlIndexes) {
+      await db.execute(idx);
+    }
+    if (withFts) {
+      await db.execute('CREATE VIRTUAL TABLE meals_fts USING fts4(name, notes)');
+    }
   }
 
   static Future<void> _upgradeMealsSchema(
@@ -140,33 +164,10 @@ class AppDatabase {
           "ALTER TABLE meals ADD COLUMN starred INTEGER NOT NULL DEFAULT 0");
     }
     if (oldVersion < 4) {
-      await db.execute('''
-        CREATE TABLE cached_products (
-          barcode       TEXT PRIMARY KEY,
-          name          TEXT NOT NULL,
-          brand         TEXT,
-          pack_size_g   REAL,
-          kcal_per_100g REAL NOT NULL,
-          protein_g     REAL,
-          carbs_g       REAL,
-          fat_g         REAL,
-          image_url     TEXT,
-          source        TEXT NOT NULL,
-          fetched_at    INTEGER NOT NULL
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE recipes (
-          id            INTEGER PRIMARY KEY AUTOINCREMENT,
-          name          TEXT NOT NULL,
-          yield_g       REAL NOT NULL,
-          kcal_per_100g REAL NOT NULL,
-          photo_path    TEXT,
-          notes         TEXT,
-          created_at    INTEGER NOT NULL,
-          updated_at    INTEGER NOT NULL
-        )
-      ''');
+      // cached_products and recipes DDL are unchanged since v4 — reuse the
+      // canonical constants so they can't drift from a fresh install.
+      await db.execute(_ddlCachedProducts);
+      await db.execute(_ddlRecipes);
       // v4 recipe_items intentionally omits the macro columns added in v5;
       // the v5 migration appends them via ALTER TABLE on existing installs.
       await db.execute('''
@@ -239,104 +240,11 @@ class AppDatabase {
       version: 8,
       singleInstance: false,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
-      onCreate: _createTestSchema,
+      onCreate: (db, _) => _createSchema(db, withFts: false),
       onUpgrade: _upgradeMealsSchema,
     );
     _meals = db;
     return db;
-  }
-
-  /// Same as [_createMealsSchema] but omits the FTS4 virtual table,
-  /// which is not available in the sqflite_common_ffi SQLite build.
-  static Future<void> _createTestSchema(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE meals (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at  INTEGER NOT NULL,
-        photo_path  TEXT NOT NULL,
-        name        TEXT,
-        notes       TEXT,
-        total_kcal  REAL NOT NULL,
-        utensil     TEXT NOT NULL DEFAULT 'fork',
-        scale_conf  TEXT,
-        model_used  TEXT NOT NULL,
-        meal_type   TEXT,
-        pending     INTEGER NOT NULL DEFAULT 0,
-        starred     INTEGER NOT NULL DEFAULT 0,
-        source      TEXT NOT NULL DEFAULT 'camera',
-        barcode     TEXT REFERENCES cached_products(barcode),
-        price_chf   REAL,
-        recipe_id   INTEGER REFERENCES recipes(id) ON DELETE SET NULL,
-        portion_g   REAL,
-        total_protein_g REAL,
-        total_carbs_g   REAL,
-        total_fat_g     REAL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE meal_items (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        meal_id       INTEGER NOT NULL REFERENCES meals(id) ON DELETE CASCADE,
-        name          TEXT NOT NULL,
-        weight_g      REAL NOT NULL,
-        kcal_per_100g REAL NOT NULL,
-        total_kcal    REAL NOT NULL,
-        sort_order    INTEGER NOT NULL DEFAULT 0,
-        usda_matched  INTEGER NOT NULL DEFAULT 0,
-        protein_per_100g REAL,
-        carbs_per_100g   REAL,
-        fat_per_100g     REAL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE cached_products (
-        barcode       TEXT PRIMARY KEY,
-        name          TEXT NOT NULL,
-        brand         TEXT,
-        pack_size_g   REAL,
-        kcal_per_100g REAL NOT NULL,
-        protein_g     REAL,
-        carbs_g       REAL,
-        fat_g         REAL,
-        image_url     TEXT,
-        source        TEXT NOT NULL,
-        fetched_at    INTEGER NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE recipes (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        name          TEXT NOT NULL,
-        yield_g       REAL NOT NULL,
-        kcal_per_100g REAL NOT NULL,
-        photo_path    TEXT,
-        notes         TEXT,
-        created_at    INTEGER NOT NULL,
-        updated_at    INTEGER NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE recipe_items (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        recipe_id     INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
-        name          TEXT NOT NULL,
-        weight_g      REAL NOT NULL,
-        kcal_per_100g REAL NOT NULL,
-        total_kcal    REAL NOT NULL,
-        source        TEXT NOT NULL DEFAULT 'manual',
-        barcode       TEXT,
-        sort_order    INTEGER NOT NULL DEFAULT 0,
-        protein_per_100g REAL,
-        carbs_per_100g   REAL,
-        fat_per_100g     REAL
-      )
-    ''');
-    await db.execute('CREATE INDEX idx_meals_created ON meals(created_at DESC)');
-    await db.execute('CREATE INDEX idx_cached_products_fetched ON cached_products(fetched_at)');
-    await db.execute('CREATE INDEX idx_recipe_items_recipe ON recipe_items(recipe_id)');
-    await db.execute('CREATE INDEX idx_meals_recipe ON meals(recipe_id)');
-    await db.execute('CREATE INDEX idx_meals_source ON meals(source)');
-    // FTS4 virtual table intentionally omitted — not available in FFI SQLite build.
   }
 
   static Future<void> closeAll() async {

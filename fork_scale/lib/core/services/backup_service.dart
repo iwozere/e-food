@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -67,18 +68,31 @@ class BackupService {
     final inputStream = InputFileStream(zipPath);
     final archive = ZipDecoder().decodeBuffer(inputStream);
 
-    for (final file in archive) {
-      if (!file.isFile) continue;
-      final outPath = p.normalize(p.join(docs.path, file.name));
-      if (!p.isWithin(docs.path, outPath)) continue; // block path-traversal entries
-      final outFile = File(outPath);
-      await outFile.create(recursive: true);
-      await outFile.writeAsBytes(file.content as List<int>);
-    }
+    await extractArchive(archive, docs.path);
 
     inputStream.close();
 
     return true;
+  }
+
+  /// Writes every regular file in [archive] under [docsPath], dropping any
+  /// entry whose normalised destination escapes [docsPath] (zip-slip /
+  /// path-traversal guard). Returns the list of absolute paths actually
+  /// written. Pure relative to [FilePicker]/DB so it is unit-testable.
+  @visibleForTesting
+  static Future<List<String>> extractArchive(
+      Archive archive, String docsPath) async {
+    final written = <String>[];
+    for (final file in archive) {
+      if (!file.isFile) continue;
+      final outPath = p.normalize(p.join(docsPath, file.name));
+      if (!p.isWithin(docsPath, outPath)) continue; // block path-traversal entries
+      final outFile = File(outPath);
+      await outFile.create(recursive: true);
+      await outFile.writeAsBytes(file.content as List<int>);
+      written.add(outPath);
+    }
+    return written;
   }
 
   static String _pad(int n) => n.toString().padLeft(2, '0');

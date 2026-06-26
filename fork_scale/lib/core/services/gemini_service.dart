@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../models/meal_item.dart';
+import 'gemini_prompt.dart';
 import 'usda_service.dart';
 
 const _model = 'gemini-2.5-flash';
@@ -38,39 +39,7 @@ class GeminiService {
     required String utensil, // 'fork' | 'knife' | 'spoon'
     required double utensilLengthCm,
   }) async {
-    final utensilName = switch (utensil) {
-      'fork' => 'dinner fork',
-      'knife' => 'dinner knife',
-      'spoon' => 'tablespoon / soup spoon',
-      _ => utensil,
-    };
-    final utensilDesc = '$utensilName (${utensilLengthCm.toStringAsFixed(1)} cm)';
-
-    final prompt = '''
-You are a nutrition analyst. A standard $utensilDesc is visible in the image as a scale reference.
-
-1. Detect the utensil and use its known length to estimate the plate diameter and food portion sizes.
-2. Identify every distinct food item on the plate.
-3. For each item estimate: weight in grams, calories per 100 g, total calories, and macronutrients per 100 g (protein, carbohydrates, fat). Use standard nutritional knowledge for typical preparation of each food.
-4. Return ONLY valid JSON, no prose, no markdown fences:
-
-{
-  "utensil_detected": true,
-  "scale_confidence": "high|medium|low",
-  "items": [
-    {
-      "name": "string",
-      "weight_g": number,
-      "kcal_per_100g": number,
-      "total_kcal": number,
-      "protein_per_100g": number,
-      "carbs_per_100g": number,
-      "fat_per_100g": number
-    }
-  ],
-  "total_kcal": number,
-  "notes": "string or null"
-}''';
+    final prompt = buildAnalysisPrompt(utensil, utensilLengthCm);
 
     final base64Image = base64Encode(imageBytes);
 
@@ -92,6 +61,10 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
         'temperature': 0.2,
         'maxOutputTokens': 8192,
         'thinkingConfig': {'thinkingBudget': 0},
+        // Force the model to emit JSON matching our item shape. The prompt's
+        // JSON instructions and _repairTruncated remain as belt-and-braces.
+        'responseMimeType': 'application/json',
+        'responseSchema': geminiResponseSchema,
       },
     });
 
@@ -117,9 +90,128 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
     return _parseAndEnrich(text);
   }
 
+  Future<GeminiAnalysisResult> _parseAndEnrich(String rawText) async {
+    final parsed = parseResponse(rawText);
+
+    final items = <MealItem>[];
+    for (var i = 0; i < parsed.items.length; i++) {
+      final item = parsed.items[i];
+      final usdaMatch = await _usda.lookup(item.name);
+      final kcalPer100g = usdaMatch?.kcalPer100g ?? item.llmKcalPer100g;
+      final totalKcal = item.weightG / 100.0 * kcalPer100g;
+
+      // Prefer USDA macros when matched, falling back per-macro to the LLM
+      // estimate where USDA lacks that nutrient — mirroring how kcal is chosen.
+      items.add(MealItem(
+        name: item.name,
+        weightG: item.weightG,
+        kcalPer100g: kcalPer100g,
+        totalKcal: totalKcal,
+        sortOrder: i,
+        usdaMatched: usdaMatch != null,
+        proteinPer100g: usdaMatch?.proteinPer100g ?? item.proteinPer100g,
+        carbsPer100g: usdaMatch?.carbsPer100g ?? item.carbsPer100g,
+        fatPer100g: usdaMatch?.fatPer100g ?? item.fatPer100g,
+      ));
+    }
+
+    final totalKcal = items.fold(0.0, (sum, item) => sum + item.totalKcal);
+
+    // Don't silently drop unreadable items — tell the user one was skipped.
+    var notes = parsed.notes;
+    if (parsed.skippedItems > 0) {
+      final warning = parsed.skippedItems == 1
+          ? '1 item could not be read and was skipped.'
+          : '${parsed.skippedItems} items could not be read and were skipped.';
+      notes = (notes == null || notes.isEmpty) ? warning : '$notes\n$warning';
+    }
+
+    return GeminiAnalysisResult(
+      utensilDetected: parsed.utensilDetected,
+      scaleConfidence: parsed.scaleConfidence,
+      items: items,
+      totalKcal: totalKcal,
+      notes: notes,
+    );
+  }
+
+  /// Parses Gemini's raw text into structured items **without** any DB/USDA
+  /// enrichment, so it is pure and unit-testable. Strips markdown fences,
+  /// salvages truncated JSON, and defensively skips malformed items (recording
+  /// the count in [GeminiParse.skippedItems]) rather than throwing away the
+  /// whole meal. Throws [GeminiParseException] only when the envelope itself is
+  /// unrecoverable.
+  @visibleForTesting
+  static GeminiParse parseResponse(String rawText) {
+    final cleaned = rawText
+        .replaceAll(RegExp(r'```json\s*'), '')
+        .replaceAll(RegExp(r'```\s*'), '')
+        .trim();
+
+    late Map<String, dynamic> json;
+    try {
+      json = jsonDecode(cleaned) as Map<String, dynamic>;
+    } catch (_) {
+      final repaired = _repairTruncated(cleaned);
+      if (repaired != null) {
+        json = repaired;
+      } else {
+        throw GeminiParseException(rawText, truncated: !cleaned.endsWith('}'));
+      }
+    }
+
+    final rawItems = (json['items'] as List<dynamic>?) ?? const [];
+    final items = <ParsedItem>[];
+    var skipped = 0;
+    for (final entry in rawItems) {
+      final item = _tryParseItem(entry);
+      if (item == null) {
+        skipped++;
+      } else {
+        items.add(item);
+      }
+    }
+
+    return GeminiParse(
+      utensilDetected: json['utensil_detected'] as bool? ?? false,
+      scaleConfidence: json['scale_confidence'] as String?,
+      items: items,
+      notes: json['notes'] as String?,
+      skippedItems: skipped,
+    );
+  }
+
+  /// Returns a [ParsedItem] for a well-formed entry, or null if [entry] is not
+  /// a map or lacks a usable name / positive weight / non-negative kcal.
+  static ParsedItem? _tryParseItem(dynamic entry) {
+    if (entry is! Map<String, dynamic>) return null;
+    final name = entry['name'];
+    if (name is! String || name.trim().isEmpty) return null;
+    final weightG = _asDouble(entry['weight_g']);
+    final kcal = _asDouble(entry['kcal_per_100g']);
+    if (weightG == null || weightG <= 0 || kcal == null || kcal < 0) {
+      return null;
+    }
+    return ParsedItem(
+      name: name.trim(),
+      weightG: weightG,
+      llmKcalPer100g: kcal,
+      proteinPer100g: _asDouble(entry['protein_per_100g']),
+      carbsPer100g: _asDouble(entry['carbs_per_100g']),
+      fatPer100g: _asDouble(entry['fat_per_100g']),
+    );
+  }
+
+  /// Coerces a JSON value to a double, tolerating numbers encoded as strings.
+  static double? _asDouble(dynamic v) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim());
+    return null;
+  }
+
   /// Attempts to close a truncated JSON response at the last complete item object.
   /// Returns the decoded map on success, null if the fragment is unrecoverable.
-  Map<String, dynamic>? _repairTruncated(String s) {
+  static Map<String, dynamic>? _repairTruncated(String s) {
     // Find the last closing brace of a complete item (i.e. "}" followed only by
     // whitespace, commas, or the start of an incomplete next item before EOF).
     final lastBrace = s.lastIndexOf('}');
@@ -132,61 +224,45 @@ You are a nutrition analyst. A standard $utensilDesc is visible in the image as 
       return null;
     }
   }
+}
 
-  Future<GeminiAnalysisResult> _parseAndEnrich(String rawText) async {
-    late Map<String, dynamic> json;
-    final cleaned = rawText
-        .replaceAll(RegExp(r'```json\s*'), '')
-        .replaceAll(RegExp(r'```\s*'), '')
-        .trim();
-    try {
-      json = jsonDecode(cleaned) as Map<String, dynamic>;
-    } catch (_) {
-      // Try to salvage truncated JSON by closing at the last complete item.
-      final repaired = _repairTruncated(cleaned);
-      if (repaired != null) {
-        json = repaired;
-      } else {
-        throw GeminiParseException(rawText, truncated: !cleaned.endsWith('}'));
-      }
-    }
+/// One food item parsed from the model response, prior to USDA enrichment.
+@visibleForTesting
+class ParsedItem {
+  final String name;
+  final double weightG;
+  final double llmKcalPer100g;
+  final double? proteinPer100g;
+  final double? carbsPer100g;
+  final double? fatPer100g;
 
-    final rawItems = (json['items'] as List<dynamic>?) ?? [];
-    final items = <MealItem>[];
+  const ParsedItem({
+    required this.name,
+    required this.weightG,
+    required this.llmKcalPer100g,
+    this.proteinPer100g,
+    this.carbsPer100g,
+    this.fatPer100g,
+  });
+}
 
-    for (var i = 0; i < rawItems.length; i++) {
-      final raw = rawItems[i] as Map<String, dynamic>;
-      final name = raw['name'] as String;
-      final weightG = (raw['weight_g'] as num).toDouble();
-      final llmKcal = (raw['kcal_per_100g'] as num).toDouble();
+/// Result of [GeminiService.parseResponse] — the structured envelope plus the
+/// count of items that were dropped because they were malformed.
+@visibleForTesting
+class GeminiParse {
+  final bool utensilDetected;
+  final String? scaleConfidence;
+  final List<ParsedItem> items;
+  final String? notes;
+  final int skippedItems;
 
-      final usdaMatch = await _usda.lookup(name);
-      final kcalPer100g = usdaMatch?.kcalPer100g ?? llmKcal;
-      final totalKcal = weightG / 100.0 * kcalPer100g;
-
-      items.add(MealItem(
-        name: name,
-        weightG: weightG,
-        kcalPer100g: kcalPer100g,
-        totalKcal: totalKcal,
-        sortOrder: i,
-        usdaMatched: usdaMatch != null,
-        proteinPer100g: (raw['protein_per_100g'] as num?)?.toDouble(),
-        carbsPer100g: (raw['carbs_per_100g'] as num?)?.toDouble(),
-        fatPer100g: (raw['fat_per_100g'] as num?)?.toDouble(),
-      ));
-    }
-
-    final totalKcal = items.fold(0.0, (sum, item) => sum + item.totalKcal);
-
-    return GeminiAnalysisResult(
-      utensilDetected: json['utensil_detected'] as bool? ?? false,
-      scaleConfidence: json['scale_confidence'] as String?,
-      items: items,
-      totalKcal: totalKcal,
-      notes: json['notes'] as String?,
-    );
-  }
+  const GeminiParse({
+    required this.utensilDetected,
+    required this.scaleConfidence,
+    required this.items,
+    required this.notes,
+    required this.skippedItems,
+  });
 }
 
 enum KeyValidationResult { valid, invalid, networkError }

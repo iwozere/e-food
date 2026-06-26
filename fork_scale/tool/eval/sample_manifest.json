@@ -1,0 +1,13 @@
+[
+  {
+    "image": "data/example_plate.jpg",
+    "utensil": "fork",
+    "utensil_length_cm": 18.5,
+    "truth_total_kcal": 540,
+    "items": [
+      { "name": "white rice", "truth_weight_g": 150 },
+      { "name": "grilled chicken breast", "truth_weight_g": 120 },
+      { "name": "steamed broccoli", "truth_weight_g": 80 }
+    ]
+  }
+]

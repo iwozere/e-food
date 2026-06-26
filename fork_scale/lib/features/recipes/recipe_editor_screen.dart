@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -11,6 +10,8 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/util/decimal_input_formatter.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/recipe.dart';
 import '../../models/recipe_item.dart';
 
@@ -92,14 +93,15 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
   }
 
   Future<void> _save() async {
+    final l = AppLocalizations.of(context);
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Recipe name is required')));
+          .showSnackBar(SnackBar(content: Text(l.editorNameRequired)));
       return;
     }
     if (_yieldG <= 0) {
-      setState(() => _yieldError = 'Yield must be greater than 0');
+      setState(() => _yieldError = l.editorYieldError);
       return;
     }
     setState(() { _yieldError = null; _saving = true; });
@@ -182,10 +184,11 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final isNew = widget.existing == null;
     return Scaffold(
       appBar: AppBar(
-        title: Text(isNew ? 'New recipe' : 'Edit recipe'),
+        title: Text(isNew ? l.recipesNew : l.mealDetailEditRecipe),
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
           TextButton(
@@ -196,8 +199,8 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
                     height: 18,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2))
-                : const Text('Save',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                : Text(l.actionSave,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -213,19 +216,17 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
                 // Name
                 TextField(
                   controller: _nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Recipe name *'),
+                  decoration: InputDecoration(labelText: l.editorRecipeName),
                 ),
                 const SizedBox(height: 12),
                 // Yield
                 TextField(
                   controller: _yieldCtrl,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))
-                  ],
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: const [DecimalInputFormatter()],
                   decoration: InputDecoration(
-                    labelText: 'Yield (g) *',
-                    hintText: 'Total grams produced',
+                    labelText: l.editorYieldLabel,
+                    hintText: l.editorYieldHint,
                     suffixText: 'g',
                     errorText: _yieldError,
                   ),
@@ -236,15 +237,15 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
                 TextField(
                   controller: _notesCtrl,
                   maxLines: 2,
-                  decoration: const InputDecoration(labelText: 'Notes (optional)'),
+                  decoration: InputDecoration(labelText: l.resultsNotesLabel),
                 ),
                 const SizedBox(height: 16),
                 // Scale multiplier chips
                 Row(
                   children: [
-                    const Text(
-                      'Scale',
-                      style: TextStyle(color: AppColors.subtle, fontSize: 13),
+                    Text(
+                      l.editorScale,
+                      style: const TextStyle(color: AppColors.subtle, fontSize: 13),
                     ),
                     const SizedBox(width: 8),
                     for (final m in [0.5, 1.0, 2.0, 3.0, 4.0])
@@ -273,13 +274,13 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Ingredients',
-                        style: TextStyle(
+                    Text(l.mealDetailIngredients,
+                        style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.bold)),
                     TextButton.icon(
                       onPressed: () => _showAddIngredientSheet(context),
                       icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add'),
+                      label: Text(l.actionAdd),
                     ),
                   ],
                 ),
@@ -292,11 +293,11 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen>
                           setState(() => _items.removeAt(e.key)),
                     )),
                 if (_items.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                     child: Center(
-                      child: Text('No ingredients yet',
-                          style: TextStyle(color: AppColors.subtle)),
+                      child: Text(l.editorNoIngredients,
+                          style: const TextStyle(color: AppColors.subtle)),
                     ),
                   ),
                 const SizedBox(height: 80),
@@ -447,6 +448,7 @@ class _IngredientRowState extends State<_IngredientRow> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     const sourceBadge = {
       'off': 'OFF',
       'swiss_fcd': 'SFCD',
@@ -465,8 +467,8 @@ class _IngredientRowState extends State<_IngredientRow> {
               Expanded(
                 child: TextField(
                   controller: _nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Ingredient',
+                  decoration: InputDecoration(
+                    labelText: l.editorIngredientLabel,
                     border: InputBorder.none,
                     contentPadding: EdgeInsets.zero,
                   ),
@@ -497,7 +499,7 @@ class _IngredientRowState extends State<_IngredientRow> {
             Row(children: [
               Expanded(
                 child: _Field(
-                  label: 'Weight (g)',
+                  label: l.ingredientWeight,
                   controller: _weightCtrl,
                   onChanged: (v) {
                     final w = double.tryParse(v) ?? _cur.weightG;
@@ -510,7 +512,7 @@ class _IngredientRowState extends State<_IngredientRow> {
               const SizedBox(width: 8),
               Expanded(
                 child: _Field(
-                  label: 'kcal/100g',
+                  label: l.ingredientKcalPer100g,
                   controller: _kcalCtrl,
                   onChanged: (v) {
                     final k = double.tryParse(v) ?? _cur.kcalPer100g;
@@ -538,9 +540,8 @@ class _IngredientRowState extends State<_IngredientRow> {
                       color: AppColors.subtle,
                     ),
                     const SizedBox(width: 2),
-                    const Text('Macros (per 100g)',
-                        style:
-                            TextStyle(fontSize: 12, color: AppColors.subtle)),
+                    Text(l.ingredientMacros,
+                        style: const TextStyle(fontSize: 12, color: AppColors.subtle)),
                   ],
                 ),
               ),
@@ -551,7 +552,7 @@ class _IngredientRowState extends State<_IngredientRow> {
                 child: Row(children: [
                   Expanded(
                     child: _Field(
-                      label: 'Protein (g)',
+                      label: l.ingredientProtein,
                       controller: _proteinCtrl,
                       onChanged: (_) => _emitMacros(),
                     ),
@@ -559,7 +560,7 @@ class _IngredientRowState extends State<_IngredientRow> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: _Field(
-                      label: 'Carbs (g)',
+                      label: l.ingredientCarbs,
                       controller: _carbsCtrl,
                       onChanged: (_) => _emitMacros(),
                     ),
@@ -567,7 +568,7 @@ class _IngredientRowState extends State<_IngredientRow> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: _Field(
-                      label: 'Fat (g)',
+                      label: l.ingredientFat,
                       controller: _fatCtrl,
                       onChanged: (_) => _emitMacros(),
                     ),
@@ -578,7 +579,7 @@ class _IngredientRowState extends State<_IngredientRow> {
             Align(
               alignment: Alignment.centerRight,
               child: Text(
-                '${_cur.totalKcal.round()} kcal',
+                l.kcalValue(_cur.totalKcal.round()),
                 style: const TextStyle(
                     color: AppColors.accent, fontWeight: FontWeight.bold),
               ),
@@ -612,9 +613,7 @@ class _Field extends StatelessWidget {
           onChanged: onChanged,
           keyboardType:
               const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))
-          ],
+          inputFormatters: const [DecimalInputFormatter()],
         ),
       ],
     );
@@ -656,6 +655,7 @@ class _PhotoPicker extends StatelessWidget {
   }
 
   void _showPickerMenu(BuildContext context) {
+    final l = AppLocalizations.of(context);
     showModalBottomSheet<void>(
       context: context,
       builder: (_) => SafeArea(
@@ -664,7 +664,7 @@ class _PhotoPicker extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt),
-              title: const Text('Take photo'),
+              title: Text(l.captureTakePhoto),
               onTap: () {
                 Navigator.pop(context);
                 onPick(ImageSource.camera);
@@ -672,7 +672,7 @@ class _PhotoPicker extends StatelessWidget {
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
-              title: const Text('Choose from gallery'),
+              title: Text(l.editorChooseGallery),
               onTap: () {
                 Navigator.pop(context);
                 onPick(ImageSource.gallery);
@@ -690,12 +690,13 @@ class _PhotoPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.add_photo_alternate_outlined, size: 36, color: AppColors.primary),
-        SizedBox(height: 8),
-        Text('Add photo (optional)', style: TextStyle(color: AppColors.subtle, fontSize: 13)),
+        const Icon(Icons.add_photo_alternate_outlined, size: 36, color: AppColors.primary),
+        const SizedBox(height: 8),
+        Text(AppLocalizations.of(context).editorAddPhoto,
+            style: const TextStyle(color: AppColors.subtle, fontSize: 13)),
       ],
     );
   }
@@ -714,6 +715,7 @@ class _SummaryBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Container(
       color: AppColors.primary,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -721,14 +723,14 @@ class _SummaryBar extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
-            'Total: ${sumKcal.round()} kcal',
+            l.editorTotalKcal(sumKcal.round()),
             style: const TextStyle(
                 color: Colors.white, fontWeight: FontWeight.bold),
           ),
           Text(
             yieldG > 0
-                ? 'Per 100g: ${kcalPer100g.round()} kcal'
-                : 'Per 100g: — kcal',
+                ? l.editorPer100(kcalPer100g.round())
+                : l.editorPer100Unknown,
             style: const TextStyle(color: Colors.white70),
           ),
         ],
@@ -809,6 +811,7 @@ class _AddIngredientSheetState extends ConsumerState<_AddIngredientSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: ConstrainedBox(
@@ -830,9 +833,9 @@ class _AddIngredientSheetState extends ConsumerState<_AddIngredientSheet> {
                 controller: _searchCtrl,
                 autofocus: true,
                 onChanged: _onQueryChanged,
-                decoration: const InputDecoration(
-                  hintText: 'Search food database…',
-                  prefixIcon: Icon(Icons.search),
+                decoration: InputDecoration(
+                  hintText: l.editorSearchHint,
+                  prefixIcon: const Icon(Icons.search),
                 ),
               ),
             ),
@@ -850,7 +853,7 @@ class _AddIngredientSheetState extends ConsumerState<_AddIngredientSheet> {
                     final r = _results[i];
                     return ListTile(
                       title: Text(r.name),
-                      trailing: Text('${r.kcalPer100g.round()} kcal/100g',
+                      trailing: Text(l.recipeKcalPer100g(r.kcalPer100g.round()),
                           style: const TextStyle(color: AppColors.subtle)),
                       onTap: () => widget.onSelectSfcd(r),
                     );
@@ -858,20 +861,20 @@ class _AddIngredientSheetState extends ConsumerState<_AddIngredientSheet> {
                 ),
               )
             else if (_searchCtrl.text.isNotEmpty)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('No results found',
-                    style: TextStyle(color: AppColors.subtle)),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(l.editorNoResults,
+                    style: const TextStyle(color: AppColors.subtle)),
               ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.qr_code_scanner),
-              title: const Text('Scan barcode'),
+              title: Text(l.captureScanBarcode),
               onTap: widget.onScanBarcode,
             ),
             ListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Enter manually'),
+              title: Text(l.barcodeEnterManually),
               onTap: widget.onManual,
             ),
             const SizedBox(height: 8),

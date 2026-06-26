@@ -16,7 +16,13 @@
       "Bash(Measure-Object)",
       "Bash(Select-Object -ExpandProperty Count)",
       "WebSearch",
-      "Bash(flutter test *)"
+      "Bash(flutter test *)",
+      "Bash(xargs wc -l)",
+      "Bash(flutter --version)",
+      "Bash(dart format *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(flutter gen-l10n *)",
+      "Bash(grep -v '\\\\.dart$\\\\|test')"
     ]
   }
 }

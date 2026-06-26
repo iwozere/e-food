@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database/meals_repository.dart';
@@ -10,9 +11,30 @@ import 'open_food_facts_service.dart';
 import 'sfcd_service.dart';
 import 'usda_service.dart';
 
+/// The Gemini API key is a sensitive credential, so it is kept in the OS secure
+/// store (Keychain / EncryptedSharedPreferences) rather than plaintext prefs.
+const geminiKeyStorageKey = 'gemini_api_key';
+const geminiKeyStorage = FlutterSecureStorage(
+  aOptions: AndroidOptions(encryptedSharedPreferences: true),
+);
+
 final geminiApiKeyProvider = FutureProvider<String?>((ref) async {
+  // Preferred location: secure storage.
+  final secure = await geminiKeyStorage.read(key: geminiKeyStorageKey);
+  if (secure != null && secure.isNotEmpty) return secure;
+
+  // One-time migration: an earlier build stored the key in plaintext
+  // SharedPreferences. If we still find it there, move it into secure storage
+  // and erase the plaintext copy. Runs on first read after upgrade, so it
+  // happens even if the user never opens Settings.
   final prefs = await SharedPreferences.getInstance();
-  return prefs.getString('gemini_api_key');
+  final legacy = prefs.getString(geminiKeyStorageKey);
+  if (legacy != null && legacy.isNotEmpty) {
+    await geminiKeyStorage.write(key: geminiKeyStorageKey, value: legacy);
+    await prefs.remove(geminiKeyStorageKey);
+    return legacy;
+  }
+  return null;
 });
 
 final geminiServiceProvider = Provider<GeminiService?>((ref) {
@@ -41,6 +63,12 @@ final productsRepositoryProvider =
 
 final recipesRepositoryProvider =
     Provider<RecipesRepository>((_) => RecipesRepository());
+
+/// Emits after every RecipesRepository write. Watch it in a FutureProvider to
+/// refetch automatically — the recipe analogue of [mealsChangesProvider].
+final recipesChangesProvider = StreamProvider<int>(
+  (ref) => ref.watch(recipesRepositoryProvider).changes,
+);
 
 final offServiceProvider =
     Provider<OpenFoodFactsService>((_) => OpenFoodFactsService());

@@ -16,7 +16,6 @@ class Meal {
   final bool starred;
   final MealSource source;
   final String? barcode;
-  final double? priceChf;
   final int? recipeId;
   final double? portionG;
   // Denormalised per-meal macro totals (grams, nullable). Single source of
@@ -41,7 +40,6 @@ class Meal {
     this.starred = false,
     this.source = MealSource.camera,
     this.barcode,
-    this.priceChf,
     this.recipeId,
     this.portionG,
     this.totalProteinG,
@@ -98,7 +96,6 @@ class Meal {
     bool? starred,
     MealSource? source,
     Object? barcode = _absent,
-    Object? priceChf = _absent,
     Object? recipeId = _absent,
     Object? portionG = _absent,
     Object? totalProteinG = _absent,
@@ -121,7 +118,6 @@ class Meal {
       starred: starred ?? this.starred,
       source: source ?? this.source,
       barcode: barcode == _absent ? this.barcode : barcode as String?,
-      priceChf: priceChf == _absent ? this.priceChf : priceChf as double?,
       recipeId: recipeId == _absent ? this.recipeId : recipeId as int?,
       portionG: portionG == _absent ? this.portionG : portionG as double?,
       totalProteinG: totalProteinG == _absent ? this.totalProteinG : totalProteinG as double?,
@@ -146,7 +142,6 @@ class Meal {
         'starred': starred ? 1 : 0,
         'source': source.dbValue,
         'barcode': barcode,
-        'price_chf': priceChf,
         'recipe_id': recipeId,
         'portion_g': portionG,
         'total_protein_g': totalProteinG,
@@ -172,7 +167,6 @@ class Meal {
         starred: (map['starred'] as int? ?? 0) != 0,
         source: MealSource.parse(map['source'] as String? ?? 'camera'),
         barcode: map['barcode'] as String?,
-        priceChf: (map['price_chf'] as num?)?.toDouble(),
         recipeId: map['recipe_id'] as int?,
         portionG: (map['portion_g'] as num?)?.toDouble(),
         totalProteinG: (map['total_protein_g'] as num?)?.toDouble(),

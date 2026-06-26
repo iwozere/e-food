@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_theme.dart';
+import '../l10n/app_localizations.dart';
 import '../models/enums.dart';
+import 'meal_type_label.dart';
 
 /// Shared meal-type choice chip row used on results, edit, barcode, and log screens.
 ///
@@ -19,20 +21,14 @@ class MealTypeSelector extends StatelessWidget {
     this.showLabel = false,
   });
 
-  static const _labels = {
-    MealType.breakfast: 'Breakfast',
-    MealType.lunch: 'Lunch',
-    MealType.snack: 'Snack',
-    MealType.dinner: 'Dinner',
-  };
-
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final chips = Wrap(
       spacing: 8,
       children: MealType.values
           .map((t) => ChoiceChip(
-                label: Text(_labels[t]!),
+                label: Text(mealTypeLabel(l, t)),
                 selected: value == t,
                 onSelected: (_) => onChanged(t),
                 selectedColor: AppColors.accent.withValues(alpha: 0.2),
@@ -47,9 +43,9 @@ class MealTypeSelector extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'MEAL TYPE',
-            style: TextStyle(
+          Text(
+            l.mealTypeHeader,
+            style: const TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.bold,
               color: AppColors.subtle,

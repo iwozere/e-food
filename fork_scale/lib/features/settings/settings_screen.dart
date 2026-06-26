@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,6 +16,8 @@ import '../../core/services/gemini_service.dart';
 import '../../core/database/app_database.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
+import '../../widgets/utensil_icons.dart';
 import '../history/history_providers.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -61,22 +62,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // One-time migration: move key from flutter_secure_storage → SharedPreferences.
-    // Handles users who had the key saved before this change.
-    String? key = prefs.getString('gemini_api_key');
-    if (key == null) {
-      try {
-        const old = FlutterSecureStorage(
-          aOptions: AndroidOptions(encryptedSharedPreferences: true),
-        );
-        final migrated = await old.read(key: 'gemini_api_key');
-        if (migrated != null && migrated.isNotEmpty) {
-          await prefs.setString('gemini_api_key', migrated);
-          await old.delete(key: 'gemini_api_key');
-          key = migrated;
-        }
-      } catch (_) {}
-    }
+    // Read the key through the provider, which owns the secure-storage read and
+    // the one-time plaintext-prefs → secure-storage migration.
+    final key = await ref.read(geminiApiKeyProvider.future);
 
     final forkCm = prefs.getDouble('fork_length_cm') ?? 18.5;
     final knifeCm = prefs.getDouble('knife_length_cm') ?? 21.0;
@@ -92,23 +80,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _knifeLengthCtrl.text = knifeCm.toStringAsFixed(1);
       _spoonLengthCtrl.text = spoonCm.toStringAsFixed(1);
       _dailyGoalCtrl.text = _dailyGoal.toString();
-      _storageFuture = _storageSummary();
+      _storageFuture = _storageSummary(AppLocalizations.of(context));
       _loading = false;
     });
-    if (key != null && key.isNotEmpty) {
-      ref.invalidate(geminiApiKeyProvider);
-    }
   }
 
   Future<void> _saveApiKey() async {
     final key = _apiKeyCtrl.text.trim();
     final messenger = ScaffoldMessenger.of(context);
-    final prefs = await SharedPreferences.getInstance();
+    final l = AppLocalizations.of(context);
 
     if (key.isEmpty) {
-      await prefs.remove('gemini_api_key');
+      await geminiKeyStorage.delete(key: geminiKeyStorageKey);
       ref.invalidate(geminiApiKeyProvider);
-      messenger.showSnackBar(const SnackBar(content: Text('API key removed')));
+      messenger.showSnackBar(SnackBar(content: Text(l.settingsApiKeyRemoved)));
       return;
     }
 
@@ -119,23 +104,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     switch (result) {
       case KeyValidationResult.valid:
-        await prefs.setString('gemini_api_key', key);
+        await geminiKeyStorage.write(key: geminiKeyStorageKey, value: key);
         ref.invalidate(geminiApiKeyProvider);
         messenger.showSnackBar(SnackBar(
-          content: const Text('API key saved and verified ✓'),
+          content: Text(l.settingsApiKeySaved),
           backgroundColor: Colors.green.shade700,
         ));
       case KeyValidationResult.invalid:
         messenger.showSnackBar(SnackBar(
-          content: const Text('Invalid API key — not saved. Check and try again.'),
+          content: Text(l.settingsApiKeyInvalid),
           backgroundColor: AppColors.error,
         ));
       case KeyValidationResult.networkError:
         // Save anyway — user may be offline, don't block them
-        await prefs.setString('gemini_api_key', key);
+        await geminiKeyStorage.write(key: geminiKeyStorageKey, value: key);
         ref.invalidate(geminiApiKeyProvider);
         messenger.showSnackBar(SnackBar(
-          content: const Text('Key saved (could not verify — no internet)'),
+          content: Text(l.settingsApiKeySavedNoVerify),
           backgroundColor: Colors.orange.shade700,
         ));
     }
@@ -152,7 +137,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(utensilLengthsProvider);
   }
 
-  Future<String> _storageSummary() async {
+  Future<String> _storageSummary(AppLocalizations l) async {
     final docs = await getApplicationDocumentsDirectory();
     final photosDir = Directory(p.join(docs.path, 'meal_photos'));
     int photoBytes = 0;
@@ -163,38 +148,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     final dbFile = File(p.join(docs.path, 'fork_scale.db'));
     final dbBytes = dbFile.existsSync() ? await dbFile.length() : 0;
-    return '${_mb(dbBytes)} DB · ${_mb(photoBytes)} photos';
+    return l.settingsStorageSummary(_mb(dbBytes), _mb(photoBytes));
   }
 
   String _mb(int bytes) => '${(bytes / 1048576).toStringAsFixed(1)} MB';
 
   Future<void> _createBackup() async {
     final messenger = ScaffoldMessenger.of(context);
+    final l = AppLocalizations.of(context);
     try {
       await BackupService.createBackup();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Backup failed: $e')));
+      messenger.showSnackBar(
+          SnackBar(content: Text(l.settingsBackupFailed('$e'))));
     }
   }
 
   Future<void> _restoreBackup() async {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
+    final l = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Restore backup?'),
-        content: const Text(
-          'This will replace all current data with the backup. '
-          'The app will reload automatically.',
-        ),
+        title: Text(l.settingsRestoreTitle),
+        content: Text(l.settingsRestoreBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l.actionCancel)),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Restore'),
+            child: Text(l.actionRestore),
           ),
         ],
       ),
@@ -208,20 +193,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ref.invalidate(historyDayTotalProvider);
         ref.invalidate(historyWeeklyKcalProvider);
         messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Backup restored.'),
-            duration: Duration(seconds: 4),
+          SnackBar(
+            content: Text(l.settingsBackupRestored),
+            duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('Restore failed: $e')));
+      messenger.showSnackBar(
+          SnackBar(content: Text(l.settingsRestoreFailed('$e'))));
     }
   }
 
   Future<void> _exportCsv() async {
     final messenger = ScaffoldMessenger.of(context);
+    final l = AppLocalizations.of(context);
     try {
       final path = await ref.read(mealsRepositoryProvider).exportCsv();
       await Share.shareXFiles(
@@ -230,23 +217,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
     } catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Export failed: $e')),
+        SnackBar(content: Text(l.settingsExportFailed('$e'))),
       );
     }
   }
 
   Future<void> _clearHistory() async {
     final messenger = ScaffoldMessenger.of(context);
+    final l = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Clear all history?'),
-        content: const Text('All meals and photos will be permanently deleted.'),
+        title: Text(l.settingsClearTitle),
+        content: Text(l.settingsClearBody),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l.actionCancel)),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete all', style: TextStyle(color: AppColors.error)),
+            child: Text(l.settingsDeleteAll,
+                style: const TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -275,7 +266,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(historyWeeklyKcalProvider);
 
     if (mounted) {
-      messenger.showSnackBar(const SnackBar(content: Text('History cleared.')));
+      messenger.showSnackBar(SnackBar(content: Text(l.settingsHistoryCleared)));
     }
   }
 
@@ -283,12 +274,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
+    final l = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(l.settingsTitle)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _SectionHeader('Capture'),
+          _SectionHeader(l.settingsSectionCapture),
           Card(
             child: RadioGroup<String>(
               groupValue: _utensil,
@@ -300,24 +292,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               child: Column(
                 children: [
                   _UtensilTile(
-                    emoji: '',
-                    label: 'Fork',
+                    icon: const ForkIcon(size: 18, color: AppColors.primary),
+                    label: l.settingsFork,
                     value: 'fork',
                     ctrl: _forkLengthCtrl,
                     onLengthChanged: (v) { setState(() => _forkLengthCm = v); _savePrefs(); },
                   ),
                   const Divider(height: 0, indent: 56),
                   _UtensilTile(
-                    emoji: '🔪',
-                    label: 'Knife',
+                    icon: const KnifeIcon(size: 18, color: AppColors.primary),
+                    label: l.settingsKnife,
                     value: 'knife',
                     ctrl: _knifeLengthCtrl,
                     onLengthChanged: (v) { setState(() => _knifeLengthCm = v); _savePrefs(); },
                   ),
                   const Divider(height: 0, indent: 56),
                   _UtensilTile(
-                    emoji: '🥄',
-                    label: 'Spoon',
+                    icon: const SpoonIcon(size: 18, color: AppColors.primary),
+                    label: l.settingsSpoon,
                     value: 'spoon',
                     ctrl: _spoonLengthCtrl,
                     onLengthChanged: (v) { setState(() => _spoonLengthCm = v); _savePrefs(); },
@@ -327,13 +319,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          _SectionHeader('Daily calorie goal'),
+          _SectionHeader(l.settingsDailyGoal),
           Card(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  const Text('Goal (kcal)'),
+                  Text(l.settingsGoalKcal),
                   const Spacer(),
                   SizedBox(
                     width: 80,
@@ -356,7 +348,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          _SectionHeader('AI Model'),
+          _SectionHeader(l.settingsAiModel),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -376,8 +368,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           color: Colors.green.shade50,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Text('Active',
-                            style: TextStyle(color: Colors.green, fontSize: 12)),
+                        child: Text(l.settingsActive,
+                            style: const TextStyle(color: Colors.green, fontSize: 12)),
                       ),
                     ],
                   ),
@@ -386,7 +378,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     controller: _apiKeyCtrl,
                     obscureText: _obscureKey,
                     decoration: InputDecoration(
-                      labelText: 'Gemini API Key',
+                      labelText: l.settingsApiKeyLabel,
                       hintText: 'AIza…',
                       suffixIcon: IconButton(
                         icon: Icon(_obscureKey ? Icons.visibility : Icons.visibility_off),
@@ -411,20 +403,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2),
                             )
-                          : const Text('Save key'),
+                          : Text(l.settingsSaveKey),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'On-device model (coming soon)',
-                    style: TextStyle(color: AppColors.subtle, fontSize: 12),
                   ),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 16),
-          _SectionHeader('Storage'),
+          _SectionHeader(l.settingsStorage),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -434,7 +421,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   FutureBuilder<String>(
                     future: _storageFuture,
                     builder: (context, snap) => Text(
-                      snap.data ?? 'Calculating…',
+                      snap.data ?? l.settingsCalculating,
                       style: const TextStyle(color: AppColors.subtle),
                     ),
                   ),
@@ -442,26 +429,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   OutlinedButton.icon(
                     onPressed: _exportCsv,
                     icon: const Icon(Icons.ios_share),
-                    label: const Text('Export to CSV'),
+                    label: Text(l.settingsExportCsv),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: _createBackup,
                     icon: const Icon(Icons.backup_outlined),
-                    label: const Text('Create backup'),
+                    label: Text(l.settingsCreateBackup),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: _restoreBackup,
                     icon: const Icon(Icons.restore_outlined),
-                    label: const Text('Restore from backup'),
+                    label: Text(l.settingsRestoreBackup),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: _clearHistory,
                     icon: const Icon(Icons.delete_forever, color: AppColors.error),
-                    label: const Text('Clear all history',
-                        style: TextStyle(color: AppColors.error)),
+                    label: Text(l.settingsClearHistory,
+                        style: const TextStyle(color: AppColors.error)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.error),
                     ),
@@ -482,6 +469,7 @@ class _ApiKeyHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -492,17 +480,15 @@ class _ApiKeyHint extends StatelessWidget {
             TextSpan(
               style: const TextStyle(fontSize: 12, color: AppColors.subtle),
               children: [
-                const TextSpan(
-                  text: 'Free — no credit card needed. Sign in with a Google account at ',
-                ),
+                TextSpan(text: l.settingsApiKeyHintPrefix),
                 WidgetSpan(
                   alignment: PlaceholderAlignment.baseline,
                   baseline: TextBaseline.alphabetic,
                   child: GestureDetector(
                     onTap: () => launchUrl(_url, mode: LaunchMode.externalApplication),
-                    child: const Text(
-                      'Google AI Studio',
-                      style: TextStyle(
+                    child: Text(
+                      l.settingsGoogleAiStudio,
+                      style: const TextStyle(
                         fontSize: 12,
                         color: AppColors.primary,
                         decoration: TextDecoration.underline,
@@ -511,7 +497,7 @@ class _ApiKeyHint extends StatelessWidget {
                     ),
                   ),
                 ),
-                const TextSpan(text: ', then tap Get API key → Create API key.'),
+                TextSpan(text: l.settingsApiKeyHintSuffix),
               ],
             ),
           ),
@@ -522,14 +508,14 @@ class _ApiKeyHint extends StatelessWidget {
 }
 
 class _UtensilTile extends StatelessWidget {
-  final String emoji;
+  final Widget icon;
   final String label;
   final String value;
   final TextEditingController ctrl;
   final ValueChanged<double> onLengthChanged;
 
   const _UtensilTile({
-    required this.emoji,
+    required this.icon,
     required this.label,
     required this.value,
     required this.ctrl,
@@ -540,7 +526,11 @@ class _UtensilTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return RadioListTile<String>(
       value: value,
-      title: Text(emoji.isEmpty ? label : '$emoji $label'),
+      title: Row(children: [
+        SizedBox(width: 22, child: Center(child: icon)),
+        const SizedBox(width: 10),
+        Text(label),
+      ]),
       secondary: SizedBox(
         width: 80,
         child: TextField(

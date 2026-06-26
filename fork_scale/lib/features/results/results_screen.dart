@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/analysis_result.dart';
 import '../../models/meal.dart';
 import '../../widgets/meal_type_selector.dart';
+import '../../widgets/total_banner.dart';
 import 'results_notifier.dart';
 import 'ingredient_card.dart';
 
@@ -100,20 +102,23 @@ class _ResultsBody extends ConsumerWidget {
     final state = ref.watch(provider);
     final notifier = ref.read(provider.notifier);
 
+    final l = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Analysis Results'),
+        title: Text(l.resultsTitle),
         leading: BackButton(onPressed: () => context.pop()),
       ),
       body: CustomScrollView(
         slivers: [
-          SliverToBoxAdapter(child: _TotalBanner(totalKcal: state.totalKcal)),
+          SliverToBoxAdapter(child: TotalBanner(totalKcal: state.totalKcal)),
           if (!state.utensilDetected)
             const SliverToBoxAdapter(child: _UtensilWarning()),
           if (state.scaleConfidence != null)
             SliverToBoxAdapter(
               child: _ConfidenceBadge(confidence: state.scaleConfidence!),
             ),
+          if (state.scaleConfidence == 'low')
+            const SliverToBoxAdapter(child: _LowConfidenceNudge()),
           SliverList.builder(
             itemCount: state.items.length,
             itemBuilder: (context, i) {
@@ -133,7 +138,7 @@ class _ResultsBody extends ConsumerWidget {
               child: OutlinedButton.icon(
                 onPressed: notifier.addItem,
                 icon: const Icon(Icons.add),
-                label: const Text('Add item'),
+                label: Text(l.resultsAddItem),
               ),
             ),
           ),
@@ -162,36 +167,6 @@ class _ResultsBody extends ConsumerWidget {
 }
 
 
-class _TotalBanner extends StatelessWidget {
-  final double totalKcal;
-  const _TotalBanner({required this.totalKcal});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      color: AppColors.primary,
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Column(
-        children: [
-          Text(
-            '${totalKcal.round()}',
-            style: const TextStyle(
-              color: AppColors.accent,
-              fontSize: 56,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Text(
-            'kcal',
-            style: TextStyle(color: Colors.white70, fontSize: 18),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _UtensilWarning extends StatelessWidget {
   const _UtensilWarning();
 
@@ -205,14 +180,14 @@ class _UtensilWarning extends StatelessWidget {
         border: Border.all(color: Colors.orange.shade200),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.warning_amber, color: Colors.orange),
-          SizedBox(width: 8),
+          const Icon(Icons.warning_amber, color: Colors.orange),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Utensil not clearly visible — estimates may be less accurate.',
-              style: TextStyle(fontSize: 13),
+              AppLocalizations.of(context).resultsUtensilWarning,
+              style: const TextStyle(fontSize: 13),
             ),
           ),
         ],
@@ -231,24 +206,27 @@ class _ConfidenceBadge extends StatelessWidget {
         _ => Colors.red,
       };
 
+  String _level(AppLocalizations l) => switch (confidence) {
+        'high' => l.confHigh,
+        'medium' => l.confMedium,
+        _ => l.confLow,
+      };
+
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: GestureDetector(
         onTap: () => showDialog(
           context: context,
           builder: (_) => AlertDialog(
-            title: const Text('Scale confidence'),
-            content: const Text(
-              'High: utensil clearly visible and unobstructed.\n'
-              'Medium: utensil partially visible or at an angle.\n'
-              'Low: utensil barely visible — portion sizes may be inaccurate.',
-            ),
+            title: Text(l.resultsScaleConfidence),
+            content: Text(l.resultsScaleConfidenceBody),
             actions: [
               TextButton(
                 onPressed: Navigator.of(context).pop,
-                child: const Text('OK'),
+                child: Text(l.actionOk),
               ),
             ],
           ),
@@ -263,11 +241,76 @@ class _ConfidenceBadge extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              'Scale confidence: ${confidence[0].toUpperCase()}${confidence.substring(1)}',
+              l.resultsScaleConfidenceLabel(_level(l)),
               style: TextStyle(color: _color, fontSize: 13, fontWeight: FontWeight.w600),
             ),
             const SizedBox(width: 4),
             Icon(Icons.info_outline, size: 14, color: _color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Actionable nudge shown on low scale confidence — beyond the colour badge,
+/// it tells the user *why* and offers to retake with the utensil in frame.
+class _LowConfidenceNudge extends StatefulWidget {
+  const _LowConfidenceNudge();
+
+  @override
+  State<_LowConfidenceNudge> createState() => _LowConfidenceNudgeState();
+}
+
+class _LowConfidenceNudgeState extends State<_LowConfidenceNudge> {
+  bool _dismissed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_dismissed) return const SizedBox.shrink();
+    final l = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.orange.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.warning_amber_rounded,
+                color: Colors.orange, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                l.resultsLowConfidenceNudge,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  onPressed: () => context.pop(),
+                  child: Text(l.resultsRetake),
+                ),
+                InkWell(
+                  onTap: () => setState(() => _dismissed = true),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close, size: 16, color: AppColors.subtle),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -306,9 +349,9 @@ class _NotesFieldState extends State<_NotesField> {
       child: TextField(
         controller: _ctrl,
         onChanged: widget.onChanged,
-        decoration: const InputDecoration(
-          labelText: 'Notes (optional)',
-          hintText: 'e.g. post-run, cheat day',
+        decoration: InputDecoration(
+          labelText: AppLocalizations.of(context).resultsNotesLabel,
+          hintText: AppLocalizations.of(context).resultsNotesHint,
         ),
         maxLines: 2,
       ),
@@ -334,7 +377,7 @@ class _SaveBar extends StatelessWidget {
                   width: 20,
                   child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                 )
-              : const Text('Save meal'),
+              : Text(AppLocalizations.of(context).resultsSaveMeal),
         ),
       ),
     );

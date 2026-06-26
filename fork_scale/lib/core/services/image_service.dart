@@ -68,12 +68,14 @@ class ImageService {
   }
 
   /// Downloads an image from [url] and saves it to the meal_photos dir.
-  /// Returns the absolute path, or null if the download fails.
+  /// Returns the absolute path, or null if the download fails or [url] is
+  /// not a well-formed `https` URL (we never fetch over plaintext http).
   Future<String?> downloadAndSave(String url, {required String filename}) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) return null;
     try {
-      final response = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 10));
+      final response =
+          await http.get(uri).timeout(const Duration(seconds: 10));
       if (response.statusCode != 200) return null;
       final dir = await _photoDir();
       final dest = File(p.join(dir.path, filename));

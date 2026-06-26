@@ -10,6 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Localization (en + de)
+  flutter_localizations:
+    sdk: flutter
+
   # State management
   flutter_riverpod: ^2.6.1
 
@@ -26,7 +30,7 @@ dependencies:
   path_provider: ^2.1.5
   path: ^1.9.0
 
-  # Secure storage (one-time migration only — key now lives in SharedPreferences)
+  # Secure storage for the Gemini API key (Keychain / EncryptedSharedPreferences)
   flutter_secure_storage: ^9.2.4
 
   # Networking
@@ -56,6 +60,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true
   assets:
     - assets/db/usda_nutrition.db
     - assets/db/sfcd.db

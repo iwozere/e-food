@@ -5,9 +5,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/recipe.dart';
 
 final _recipesProvider = FutureProvider.autoDispose<List<Recipe>>((ref) {
+  // Refetch automatically after any recipe write.
+  ref.watch(recipesChangesProvider);
   return ref.read(recipesRepositoryProvider).getAllRecipes();
 });
 
@@ -17,30 +20,22 @@ class RecipesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final recipesAsync = ref.watch(_recipesProvider);
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Recipes')),
+      appBar: AppBar(title: Text(l.recipesTitle)),
       floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          await context.push('/recipes/new');
-          ref.invalidate(_recipesProvider);
-        },
+        onPressed: () => context.push('/recipes/new'),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         child: const Icon(Icons.add),
       ),
       body: recipesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(l.commonError('$e'))),
         data: (recipes) => recipes.isEmpty
-            ? _EmptyState(onNewRecipe: () async {
-                await context.push('/recipes/new');
-                ref.invalidate(_recipesProvider);
-              })
-            : _RecipeGrid(
-                recipes: recipes,
-                onRefresh: () => ref.invalidate(_recipesProvider),
-              ),
+            ? _EmptyState(onNewRecipe: () => context.push('/recipes/new'))
+            : _RecipeGrid(recipes: recipes),
       ),
     );
   }
@@ -48,8 +43,7 @@ class RecipesScreen extends ConsumerWidget {
 
 class _RecipeGrid extends StatelessWidget {
   final List<Recipe> recipes;
-  final VoidCallback onRefresh;
-  const _RecipeGrid({required this.recipes, required this.onRefresh});
+  const _RecipeGrid({required this.recipes});
 
   @override
   Widget build(BuildContext context) {
@@ -62,19 +56,18 @@ class _RecipeGrid extends StatelessWidget {
         childAspectRatio: 0.85,
       ),
       itemCount: recipes.length,
-      itemBuilder: (context, i) =>
-          _RecipeCard(recipe: recipes[i], onRefresh: onRefresh),
+      itemBuilder: (context, i) => _RecipeCard(recipe: recipes[i]),
     );
   }
 }
 
 class _RecipeCard extends ConsumerWidget {
   final Recipe recipe;
-  final VoidCallback onRefresh;
-  const _RecipeCard({required this.recipe, required this.onRefresh});
+  const _RecipeCard({required this.recipe});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     return GestureDetector(
       onTap: () => context.push('/recipes/${recipe.id}'),
       onLongPress: () => _showContextMenu(context, ref),
@@ -97,7 +90,8 @@ class _RecipeCard extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${recipe.kcalPer100g.round()} kcal/100g · ${recipe.yieldG.round()} g',
+                    l.recipesCardSubtitle(
+                        recipe.kcalPer100g.round(), recipe.yieldG.round()),
                     style: const TextStyle(fontSize: 11, color: AppColors.subtle),
                   ),
                 ],
@@ -110,6 +104,7 @@ class _RecipeCard extends ConsumerWidget {
   }
 
   Future<void> _showContextMenu(BuildContext context, WidgetRef ref) async {
+    final l = AppLocalizations.of(context);
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (_) => SafeArea(
@@ -118,17 +113,17 @@ class _RecipeCard extends ConsumerWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit'),
+              title: Text(l.actionEdit),
               onTap: () => Navigator.pop(context, 'edit'),
             ),
             ListTile(
               leading: const Icon(Icons.copy_outlined),
-              title: const Text('Duplicate'),
+              title: Text(l.recipesDuplicate),
               onTap: () => Navigator.pop(context, 'duplicate'),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: AppColors.error),
-              title: const Text('Delete', style: TextStyle(color: AppColors.error)),
+              title: Text(l.actionDelete, style: const TextStyle(color: AppColors.error)),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
@@ -140,14 +135,13 @@ class _RecipeCard extends ConsumerWidget {
 
     switch (action) {
       case 'edit':
-        await context.push('/recipes/${recipe.id}/edit');
-        onRefresh();
+        context.push('/recipes/${recipe.id}/edit');
       case 'duplicate':
         final repo = ref.read(recipesRepositoryProvider);
         final now = DateTime.now();
         final copy = recipe.copyWith(
           id: null,
-          name: '${recipe.name} (copy)',
+          name: l.recipesCopySuffix(recipe.name),
           createdAt: now,
           updatedAt: now,
           items: recipe.items
@@ -155,28 +149,26 @@ class _RecipeCard extends ConsumerWidget {
               .toList(),
         );
         await repo.insertRecipe(copy);
-        onRefresh();
       case 'delete':
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('Delete recipe?'),
-            content: Text('Delete "${recipe.name}"?'),
+            title: Text(l.recipesDeleteTitle),
+            content: Text(l.recipesDeleteBody(recipe.name)),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancel')),
+                  child: Text(l.actionCancel)),
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Delete',
-                    style: TextStyle(color: AppColors.error)),
+                child: Text(l.actionDelete,
+                    style: const TextStyle(color: AppColors.error)),
               ),
             ],
           ),
         );
         if (confirmed == true && context.mounted) {
           await ref.read(recipesRepositoryProvider).deleteRecipe(recipe.id!);
-          onRefresh();
         }
     }
   }
@@ -211,22 +203,23 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text('🍳', style: TextStyle(fontSize: 64)),
           const SizedBox(height: 16),
-          const Text('No recipes yet',
-              style: TextStyle(fontSize: 16, color: AppColors.subtle)),
+          Text(l.recipesEmptyTitle,
+              style: const TextStyle(fontSize: 16, color: AppColors.subtle)),
           const SizedBox(height: 8),
-          const Text('Tap + to build your first recipe',
-              style: TextStyle(fontSize: 13, color: AppColors.subtle)),
+          Text(l.recipesEmptySubtitle,
+              style: const TextStyle(fontSize: 13, color: AppColors.subtle)),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: onNewRecipe,
             icon: const Icon(Icons.add),
-            label: const Text('New recipe'),
+            label: Text(l.recipesNew),
           ),
         ],
       ),

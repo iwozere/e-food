@@ -1,11 +1,20 @@
+import 'dart:async';
+
 import '../../models/recipe.dart';
 import '../../models/recipe_item.dart';
 import 'app_database.dart';
 
 class RecipesRepository {
+  // Emits after every write so a watching provider can refetch automatically,
+  // mirroring MealsRepository.changes — removes the need for manual invalidation.
+  final _changesController = StreamController<int>.broadcast();
+  int _revision = 0;
+  Stream<int> get changes => _changesController.stream;
+  void _bump() => _changesController.add(++_revision);
+
   Future<int> insertRecipe(Recipe recipe) async {
     final db = await AppDatabase.mealsDb;
-    return db.transaction((txn) async {
+    final id = await db.transaction((txn) async {
       final id = await txn.insert('recipes', recipe.toMap());
       if (recipe.items.isNotEmpty) {
         final batch = txn.batch();
@@ -16,6 +25,8 @@ class RecipesRepository {
       }
       return id;
     });
+    _bump();
+    return id;
   }
 
   Future<void> updateRecipe(Recipe recipe) async {
@@ -34,12 +45,14 @@ class RecipesRepository {
         await batch.commit(noResult: true);
       }
     });
+    _bump();
   }
 
   Future<void> deleteRecipe(int id) async {
     final db = await AppDatabase.mealsDb;
     // recipe_items cascade via FK; plain delete is sufficient.
     await db.delete('recipes', where: 'id = ?', whereArgs: [id]);
+    _bump();
   }
 
   Future<Recipe?> getRecipe(int id) async {

@@ -3,11 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
-import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
 import '../../widgets/meal_type_selector.dart';
+import '../../widgets/total_banner.dart';
 import '../results/ingredient_card.dart';
 
 class MealEditScreen extends ConsumerStatefulWidget {
@@ -70,7 +71,7 @@ class _MealEditScreenState extends ConsumerState<MealEditScreen> {
   void _addItem() {
     setState(() {
       _items.add(MealItem(
-        name: 'New item',
+        name: AppLocalizations.of(context).mealEditNewItem,
         weightG: 100,
         kcalPer100g: 0,
         totalKcal: 0,
@@ -101,14 +102,15 @@ class _MealEditScreenState extends ConsumerState<MealEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Edit meal'),
+        title: Text(l.mealEditTitle),
         leading: BackButton(onPressed: () => context.pop()),
       ),
       body: CustomScrollView(
         slivers: [
-          SliverToBoxAdapter(child: _TotalBanner(totalKcal: _totalKcal)),
+          SliverToBoxAdapter(child: TotalBanner(totalKcal: _totalKcal)),
           SliverList.builder(
             itemCount: _items.length,
             itemBuilder: (context, i) {
@@ -128,7 +130,7 @@ class _MealEditScreenState extends ConsumerState<MealEditScreen> {
               child: OutlinedButton.icon(
                 onPressed: _addItem,
                 icon: const Icon(Icons.add),
-                label: const Text('Add item'),
+                label: Text(l.resultsAddItem),
               ),
             ),
           ),
@@ -148,36 +150,6 @@ class _MealEditScreenState extends ConsumerState<MealEditScreen> {
   }
 }
 
-// ── Total kcal banner ─────────────────────────────────────────────────────────
-
-class _TotalBanner extends StatelessWidget {
-  final double totalKcal;
-  const _TotalBanner({required this.totalKcal});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      color: AppColors.primary,
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Column(
-        children: [
-          Text(
-            '${totalKcal.round()}',
-            style: const TextStyle(
-              color: AppColors.accent,
-              fontSize: 56,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Text('kcal', style: TextStyle(color: Colors.white70, fontSize: 18)),
-        ],
-      ),
-    );
-  }
-}
-
-
 // ── Notes field ───────────────────────────────────────────────────────────────
 
 class _NotesField extends StatelessWidget {
@@ -186,13 +158,14 @@ class _NotesField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: TextField(
         controller: controller,
-        decoration: const InputDecoration(
-          labelText: 'Notes (optional)',
-          hintText: 'e.g. post-run, cheat day',
+        decoration: InputDecoration(
+          labelText: l.resultsNotesLabel,
+          hintText: l.resultsNotesHint,
         ),
         maxLines: 2,
       ),
@@ -221,7 +194,7 @@ class _SaveBar extends StatelessWidget {
                   child: CircularProgressIndicator(
                       color: Colors.white, strokeWidth: 2),
                 )
-              : const Text('Save changes'),
+              : Text(AppLocalizations.of(context).mealEditSaveChanges),
         ),
       ),
     );

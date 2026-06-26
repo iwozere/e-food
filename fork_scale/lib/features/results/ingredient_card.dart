@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/util/decimal_input_formatter.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/meal_item.dart';
 
 class IngredientCard extends StatefulWidget {
@@ -119,6 +120,7 @@ class _IngredientCardState extends State<IngredientCard> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final totalKcal = _current.computedKcal;
 
     return Card(
@@ -135,8 +137,8 @@ class _IngredientCardState extends State<IngredientCard> {
                     controller: _nameCtrl,
                     onChanged: _onNameChanged,
                     style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-                    decoration: const InputDecoration(
-                      labelText: 'Food item',
+                    decoration: InputDecoration(
+                      labelText: l.ingredientNameLabel,
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.zero,
                     ),
@@ -150,25 +152,25 @@ class _IngredientCardState extends State<IngredientCard> {
                       color: AppColors.accent.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.edit, size: 10, color: AppColors.accent),
-                        SizedBox(width: 2),
-                        Text('edited',
-                            style: TextStyle(fontSize: 10, color: AppColors.accent)),
+                        const Icon(Icons.edit, size: 10, color: AppColors.accent),
+                        const SizedBox(width: 2),
+                        Text(l.ingredientEdited,
+                            style: const TextStyle(fontSize: 10, color: AppColors.accent)),
                       ],
                     ),
                   ),
                 if (!_current.usdaMatched && !widget.isEdited)
                   Tooltip(
-                    message: 'Calorie value from AI (not USDA database)',
-                    child: Icon(Icons.science_outlined, size: 16, color: AppColors.subtle),
+                    message: l.ingredientAiValueTooltip,
+                    child: const Icon(Icons.science_outlined, size: 16, color: AppColors.subtle),
                   ),
                 IconButton(
                   icon: const Icon(Icons.delete_outline, color: AppColors.error),
                   onPressed: widget.onDelete,
-                  tooltip: 'Remove item',
+                  tooltip: l.ingredientRemove,
                   visualDensity: VisualDensity.compact,
                 ),
               ],
@@ -178,7 +180,7 @@ class _IngredientCardState extends State<IngredientCard> {
               children: [
                 Expanded(
                   child: _LabeledField(
-                    label: 'Weight (g)',
+                    label: l.ingredientWeight,
                     controller: _weightCtrl,
                     onChanged: _onWeightChanged,
                     suffix: Row(
@@ -193,7 +195,7 @@ class _IngredientCardState extends State<IngredientCard> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: _LabeledField(
-                    label: 'kcal / 100g',
+                    label: l.ingredientKcalPer100g,
                     controller: _kcalCtrl,
                     onChanged: _onKcalChanged,
                   ),
@@ -217,8 +219,8 @@ class _IngredientCardState extends State<IngredientCard> {
                       color: AppColors.subtle,
                     ),
                     const SizedBox(width: 2),
-                    const Text('Macros (per 100g)',
-                        style: TextStyle(fontSize: 12, color: AppColors.subtle)),
+                    Text(l.ingredientMacros,
+                        style: const TextStyle(fontSize: 12, color: AppColors.subtle)),
                   ],
                 ),
               ),
@@ -227,7 +229,7 @@ class _IngredientCardState extends State<IngredientCard> {
               Row(children: [
                 Expanded(
                   child: _LabeledField(
-                    label: 'Protein (g)',
+                    label: l.ingredientProtein,
                     controller: _proteinCtrl,
                     onChanged: (_) => _emitMacros(),
                   ),
@@ -235,7 +237,7 @@ class _IngredientCardState extends State<IngredientCard> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: _LabeledField(
-                    label: 'Carbs (g)',
+                    label: l.ingredientCarbs,
                     controller: _carbsCtrl,
                     onChanged: (_) => _emitMacros(),
                   ),
@@ -243,7 +245,7 @@ class _IngredientCardState extends State<IngredientCard> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: _LabeledField(
-                    label: 'Fat (g)',
+                    label: l.ingredientFat,
                     controller: _fatCtrl,
                     onChanged: (_) => _emitMacros(),
                   ),
@@ -253,7 +255,7 @@ class _IngredientCardState extends State<IngredientCard> {
             Align(
               alignment: Alignment.centerRight,
               child: Text(
-                '${totalKcal.round()} kcal',
+                l.ingredientKcalTotal(totalKcal.round()),
                 style: const TextStyle(
                   color: AppColors.accent,
                   fontWeight: FontWeight.bold,
@@ -292,7 +294,7 @@ class _LabeledField extends StatelessWidget {
           controller: controller,
           onChanged: onChanged,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+          inputFormatters: const [DecimalInputFormatter()],
           decoration: InputDecoration(suffixIcon: suffix),
         ),
       ],
@@ -307,10 +309,11 @@ class _StepButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return IconButton(
       icon: Icon(icon, size: 18, color: AppColors.primary),
       onPressed: onTap,
-      tooltip: icon == Icons.add ? 'Increase weight by 10g' : 'Decrease weight by 10g',
+      tooltip: icon == Icons.add ? l.ingredientIncrease : l.ingredientDecrease,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
     );

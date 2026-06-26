@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/recipe.dart';
@@ -89,6 +90,7 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
   @override
   Widget build(BuildContext context) {
     final r = widget.recipe;
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -101,11 +103,11 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
             Text(r.name,
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('${r.kcalPer100g.round()} kcal/100g',
+            Text(l.recipeKcalPer100g(r.kcalPer100g.round()),
                 style: const TextStyle(color: AppColors.subtle)),
             const SizedBox(height: 20),
-            const Text('How much did you eat?',
-                style: TextStyle(fontWeight: FontWeight.w600)),
+            Text(l.logPortionQuestion,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -138,7 +140,7 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
             const SizedBox(height: 8),
             Center(
               child: Text(
-                '${_totalKcal.round()} kcal',
+                l.kcalValue(_totalKcal.round()),
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
@@ -154,7 +156,7 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
             const SizedBox(height: 12),
             TextField(
               controller: _notesCtrl,
-              decoration: const InputDecoration(labelText: 'Notes (optional)'),
+              decoration: InputDecoration(labelText: l.resultsNotesLabel),
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
@@ -166,7 +168,7 @@ class _LogPortionSheetState extends ConsumerState<LogPortionSheet> {
                       child:
                           CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.check),
-              label: const Text('Log meal'),
+              label: Text(l.logPortionLogMeal),
             ),
           ],
         ),

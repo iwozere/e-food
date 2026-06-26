@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/open_food_facts_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/cached_product.dart';
 import '../../models/enums.dart';
 import '../../models/meal.dart';
@@ -140,17 +141,19 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
     );
     await ref.read(mealsRepositoryProvider).insertMeal(meal);
     if (!mounted) return;
+    final l = AppLocalizations.of(context);
     context.go('/history');
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${_nameCtrl.text} logged (${total.round()} kcal)')),
+      SnackBar(content: Text(l.barcodeLoggedSnack(_nameCtrl.text, total.round()))),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(title: Text('Barcode: ${widget.barcode}')),
+        appBar: AppBar(title: Text(l.barcodeTitle(widget.barcode))),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -162,7 +165,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
     final p = _product!;
 
     return Scaffold(
-      appBar: AppBar(title: Text(p.brand ?? 'Product')),
+      appBar: AppBar(title: Text(p.brand ?? l.barcodeProductFallback)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -183,7 +186,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
             controller: _nameCtrl,
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             decoration: InputDecoration(
-              labelText: 'Product name',
+              labelText: l.barcodeProductName,
               suffix: p.brand != null
                   ? Text(p.brand!,
                       style: const TextStyle(color: AppColors.subtle, fontSize: 13))
@@ -194,7 +197,9 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
           const SizedBox(height: 8),
           // Pack size row
           Row(children: [
-            Text('Pack: ${p.packSizeG != null ? "${p.packSizeG!.round()} g/ml" : "—"}',
+            Text(
+                l.barcodePack(
+                    p.packSizeG != null ? '${p.packSizeG!.round()} g/ml' : '—'),
                 style: const TextStyle(color: AppColors.subtle)),
           ]),
           const SizedBox(height: 16),
@@ -208,8 +213,8 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('How much did you have?',
-                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  Text(l.barcodeHowMuch,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -244,7 +249,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
                   const SizedBox(height: 8),
                   Center(
                     child: Text(
-                      'Total: ${_totalKcal.round()} kcal',
+                      l.barcodeTotal(_totalKcal.round()),
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -269,7 +274,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
               child: FilledButton.icon(
                 onPressed: _logMeal,
                 icon: const Icon(Icons.check),
-                label: const Text('Log this meal'),
+                label: Text(l.barcodeLogMeal),
               ),
             ),
             const SizedBox(width: 12),
@@ -300,7 +305,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
                 }
               },
               icon: const Icon(Icons.menu_book),
-              label: const Text('Add to recipe'),
+              label: Text(l.barcodeAddToRecipe),
             ),
           ]),
           if (!widget.forRecipe) ...[
@@ -320,7 +325,7 @@ class _BarcodeResultScreenState extends ConsumerState<BarcodeResultScreen> {
                   });
                 },
                 icon: const Icon(Icons.playlist_add),
-                label: const Text('Add more items'),
+                label: Text(l.barcodeAddMoreItems),
               ),
             ),
           ],
@@ -344,17 +349,18 @@ class _NutritionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Nutrition per 100 g / 100 ml',
-                style: TextStyle(fontWeight: FontWeight.w600)),
+            Text(l.barcodeNutritionHeader,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             Row(children: [
-              const Expanded(child: Text('Energy (kcal)')),
+              Expanded(child: Text(l.barcodeEnergy)),
               SizedBox(
                 width: 90,
                 child: TextField(
@@ -367,9 +373,9 @@ class _NutritionCard extends StatelessWidget {
                 ),
               ),
             ]),
-            if (product.proteinG != null) _Row('Protein', product.proteinG!, 'g'),
-            if (product.carbsG != null) _Row('Carbs', product.carbsG!, 'g'),
-            if (product.fatG != null) _Row('Fat', product.fatG!, 'g'),
+            if (product.proteinG != null) _Row(l.macroProtein, product.proteinG!, 'g'),
+            if (product.carbsG != null) _Row(l.macroCarbs, product.carbsG!, 'g'),
+            if (product.fatG != null) _Row(l.macroFat, product.fatG!, 'g'),
           ],
         ),
       ),
@@ -451,7 +457,7 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Product name is required')),
+        SnackBar(content: Text(AppLocalizations.of(context).barcodeNameRequired)),
       );
       return;
     }
@@ -465,15 +471,19 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
   }
 
   Future<void> _logManual() async {
+    final l = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Product name is required')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(l.barcodeNameRequired)));
       return;
     }
     final kcal = double.tryParse(_kcalCtrl.text) ?? 0;
     final total = _amount / 100 * kcal;
+    // Warn (don't block) when logging a 0-kcal entry — likely an oversight.
+    if (kcal == 0) {
+      messenger.showSnackBar(SnackBar(content: Text(l.barcodeZeroKcalWarning)));
+    }
     setState(() => _saving = true);
     try {
       await ref.read(mealsRepositoryProvider).insertMeal(Meal(
@@ -504,18 +514,19 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_showForm ? 'Enter manually' : 'Product not found'),
+        title: Text(_showForm ? l.barcodeEnterManually : l.barcodeNotFoundTitle),
         leading: _showForm
             ? BackButton(onPressed: () => setState(() => _showForm = false))
             : null,
       ),
-      body: _showForm ? _buildForm() : _buildNotFound(),
+      body: _showForm ? _buildForm(l) : _buildNotFound(l),
     );
   }
 
-  Widget _buildNotFound() {
+  Widget _buildNotFound(AppLocalizations l) {
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -525,8 +536,8 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
           const SizedBox(height: 16),
           Text(
             widget.isTimeout
-                ? 'Could not reach product database.'
-                : 'No product found for barcode ${widget.barcode}.',
+                ? l.barcodeDbUnreachable
+                : l.barcodeNoProduct(widget.barcode),
             textAlign: TextAlign.center,
             style: const TextStyle(color: AppColors.subtle),
           ),
@@ -534,32 +545,32 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
           OutlinedButton.icon(
             onPressed: _openContribute,
             icon: const Icon(Icons.open_in_browser),
-            label: const Text('Contribute to Open Food Facts'),
+            label: Text(l.barcodeContribute),
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: () => setState(() => _showForm = true),
             icon: const Icon(Icons.edit),
-            label: const Text('Enter manually'),
+            label: Text(l.barcodeEnterManually),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildForm() {
+  Widget _buildForm(AppLocalizations l) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Text(
-          'Barcode: ${widget.barcode}',
+          l.barcodeTitle(widget.barcode),
           style: const TextStyle(color: AppColors.subtle, fontSize: 12),
         ),
         const SizedBox(height: 16),
         TextField(
           controller: _nameCtrl,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'Product name *'),
+          decoration: InputDecoration(labelText: l.barcodeProductNameStar),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 12),
@@ -567,15 +578,15 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
           controller: _kcalCtrl,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(
-            labelText: 'kcal per 100 g',
+          decoration: InputDecoration(
+            labelText: l.barcodeKcalPer100,
             suffixText: 'kcal',
           ),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 20),
-        const Text('How much did you have?',
-            style: TextStyle(fontWeight: FontWeight.w600)),
+        Text(l.barcodeHowMuch,
+            style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -607,7 +618,7 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
         const SizedBox(height: 8),
         Center(
           child: Text(
-            'Total: ${_totalKcal.round()} kcal',
+            l.barcodeTotal(_totalKcal.round()),
             style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -627,7 +638,7 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
           FilledButton.icon(
             onPressed: _addToRecipe,
             icon: const Icon(Icons.menu_book),
-            label: const Text('Add to recipe'),
+            label: Text(l.barcodeAddToRecipe),
           )
         else
           FilledButton.icon(
@@ -640,7 +651,7 @@ class _NotFoundScreenState extends ConsumerState<_NotFoundScreen> {
                         color: Colors.white, strokeWidth: 2),
                   )
                 : const Icon(Icons.check),
-            label: const Text('Log this meal'),
+            label: Text(l.barcodeLogMeal),
           ),
       ],
     );

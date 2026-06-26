@@ -7,8 +7,10 @@ import 'package:intl/intl.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/enums.dart';
 import '../../models/meal.dart';
+import '../../widgets/meal_type_label.dart';
 import 'history_providers.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
@@ -51,9 +53,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final weeklyAsync = ref.watch(historyWeeklyKcalProvider);
     final goal =
         (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Meal History')),
+      appBar: AppBar(title: Text(l.historyTitle)),
       floatingActionButton: null,
       body: Column(
         children: [
@@ -79,7 +83,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               child: Row(
                 children: [
                   FilterChip(
-                    label: const Text('Starred'),
+                    label: Text(l.historyStarred),
                     avatar: Icon(
                       _showStarredOnly ? Icons.star : Icons.star_border,
                       size: 16,
@@ -94,7 +98,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   for (final type in ['breakfast', 'lunch', 'dinner', 'snack']) ...[
                     const SizedBox(width: 8),
                     FilterChip(
-                      label: Text(_typeFilterLabel(type)),
+                      label: Text(mealTypeLabelFromDb(l, type)),
                       selected: _mealType == type,
                       onSelected: (v) =>
                           setState(() => _mealType = v ? type : null),
@@ -107,7 +111,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     const SizedBox(width: 8),
                     Chip(
                       label: Text(
-                        DateFormat('EEE, MMM d').format(_selectedDay!),
+                        DateFormat('EEE, MMM d', locale).format(_selectedDay!),
                         style: const TextStyle(fontSize: 12),
                       ),
                       deleteIcon: const Icon(Icons.close, size: 14),
@@ -123,9 +127,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             child: TextField(
               controller: _searchCtrl,
               onChanged: _onSearch,
-              decoration: const InputDecoration(
-                hintText: 'Search meals…',
-                prefixIcon: Icon(Icons.search),
+              decoration: InputDecoration(
+                hintText: l.historySearchHint,
+                prefixIcon: const Icon(Icons.search),
               ),
             ),
           ),
@@ -133,7 +137,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             child: mealsAsync.when(
               loading: () =>
                   const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
+              error: (e, _) => Center(child: Text(l.commonError('$e'))),
               data: (meals) => meals.isEmpty
                   ? const _EmptyState()
                   : _MealList(
@@ -169,6 +173,8 @@ class _WeeklyChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
     final today = DateTime.now();
     final days = List.generate(7, (i) {
       final d = today.subtract(Duration(days: 6 - i));
@@ -224,7 +230,7 @@ class _WeeklyChart extends StatelessWidget {
                           alignment: Alignment.topRight,
                           style: const TextStyle(
                               fontSize: 9, color: AppColors.subtle),
-                          labelResolver: (_) => 'Goal',
+                          labelResolver: (_) => l.historyGoalLine,
                         ),
                       ),
                     ],
@@ -241,7 +247,7 @@ class _WeeklyChart extends StatelessWidget {
                     return Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                        i == 6 ? 'Today' : DateFormat('E').format(days[i]),
+                        i == 6 ? l.historyToday : DateFormat('E', locale).format(days[i]),
                         style: const TextStyle(
                             fontSize: 10, color: AppColors.subtle),
                       ),
@@ -293,6 +299,8 @@ class _DaySummaryBar extends ConsumerWidget {
     final total = dayTotalAsync.valueOrNull ?? 0.0;
     final fraction = (total / goal).clamp(0.0, 1.0);
     final overGoal = total > goal;
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
 
     return Container(
       color: AppColors.primary,
@@ -304,11 +312,11 @@ class _DaySummaryBar extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                DateFormat('EEEE, MMM d').format(DateTime.now()),
+                DateFormat('EEEE, MMM d', locale).format(DateTime.now()),
                 style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
               Text(
-                '${total.round()} / ${goal.round()} kcal',
+                l.historyDayTotal(total.round(), goal.round()),
                 style: TextStyle(
                   color: overGoal ? AppColors.error : AppColors.accent,
                   fontWeight: FontWeight.bold,
@@ -380,6 +388,8 @@ class _MealTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
     return Dismissible(
       key: ValueKey(meal.id),
       direction: DismissDirection.endToStart,
@@ -393,17 +403,16 @@ class _MealTile extends ConsumerWidget {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('Delete meal?'),
-            content: const Text(
-                'This will permanently delete the meal and its photo.'),
+            title: Text(l.historyDeleteTitle),
+            content: Text(l.historyDeleteBody),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancel')),
+                  child: Text(l.actionCancel)),
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Delete',
-                    style: TextStyle(color: AppColors.error)),
+                child: Text(l.actionDelete,
+                    style: const TextStyle(color: AppColors.error)),
               ),
             ],
           ),
@@ -415,7 +424,7 @@ class _MealTile extends ConsumerWidget {
         onRefresh();
         if (context.mounted) {
           ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('Meal deleted')));
+              .showSnackBar(SnackBar(content: Text(l.historyMealDeleted)));
         }
       },
       child: GestureDetector(
@@ -431,8 +440,8 @@ class _MealTile extends ConsumerWidget {
           leading: _Thumbnail(path: meal.photoPath, source: meal.source),
           title: Text(
             meal.pending
-                ? 'Pending — not yet analyzed'
-                : (meal.name ?? _autoName(meal)),
+                ? l.historyPending
+                : (meal.name ?? _autoName(l, meal)),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: meal.pending
@@ -440,7 +449,7 @@ class _MealTile extends ConsumerWidget {
                     color: AppColors.subtle, fontStyle: FontStyle.italic)
                 : null,
           ),
-          subtitle: Text(_subtitle(meal)),
+          subtitle: Text(_subtitle(l, locale, meal)),
           trailing: meal.pending
               ? const Icon(Icons.schedule, color: AppColors.subtle, size: 20)
               : Column(
@@ -458,14 +467,14 @@ class _MealTile extends ConsumerWidget {
                             .read(mealsRepositoryProvider)
                             .starMeal(meal.id!, starred: !meal.starred);
                       },
-                      tooltip: meal.starred ? 'Unstar meal' : 'Star meal',
+                      tooltip: meal.starred ? l.historyUnstar : l.historyStar,
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${meal.totalKcal.round()} kcal',
+                      l.kcalValue(meal.totalKcal.round()),
                       style: const TextStyle(
                         color: AppColors.accent,
                         fontWeight: FontWeight.bold,
@@ -480,6 +489,7 @@ class _MealTile extends ConsumerWidget {
   }
 
   Future<void> _showContextMenu(BuildContext context, WidgetRef ref) async {
+    final l = AppLocalizations.of(context);
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (_) => SafeArea(
@@ -488,12 +498,12 @@ class _MealTile extends ConsumerWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.copy_outlined),
-              title: const Text('Copy to today'),
+              title: Text(l.historyCopyToToday),
               onTap: () => Navigator.pop(context, 'copy'),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: AppColors.error),
-              title: const Text('Delete', style: TextStyle(color: AppColors.error)),
+              title: Text(l.actionDelete, style: const TextStyle(color: AppColors.error)),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
@@ -506,9 +516,10 @@ class _MealTile extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Copied ${meal.name ?? 'meal'} to today'),
+            content: Text(
+                l.historyCopiedToToday(meal.name ?? l.historyMealFallback)),
             action: SnackBarAction(
-              label: 'View',
+              label: l.actionView,
               onPressed: () => context.push('/history/$newId'),
             ),
           ),
@@ -519,21 +530,21 @@ class _MealTile extends ConsumerWidget {
       onRefresh();
       if (context.mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Meal deleted')));
+            .showSnackBar(SnackBar(content: Text(l.historyMealDeleted)));
       }
     }
   }
 
-  String _autoName(Meal meal) {
-    if (meal.items.isEmpty) return 'Meal';
+  String _autoName(AppLocalizations l, Meal meal) {
+    if (meal.items.isEmpty) return l.historyMealFallback;
     final names = meal.items.take(2).map((i) => i.name).join(', ');
     return meal.items.length > 2 ? '$names…' : names;
   }
 
-  String _subtitle(Meal meal) {
-    final time = DateFormat('MMM d, h:mm a').format(meal.createdAt);
+  String _subtitle(AppLocalizations l, String locale, Meal meal) {
+    final time = DateFormat('MMM d, h:mm a', locale).format(meal.createdAt);
     if (meal.pending) return time;
-    final typeLabel = _mealTypeLabel(meal.mealType);
+    final typeLabel = mealTypeLabel(l, meal.mealType);
     return typeLabel.isEmpty ? time : '$typeLabel · $time';
   }
 }
@@ -583,9 +594,10 @@ class _SourceBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final label = switch (source) {
-      MealSource.barcode => '🔖 Barcode',
-      MealSource.recipePortion => '🍳 Recipe',
+      MealSource.barcode => '🔖 ${l.sourceBarcode}',
+      MealSource.recipePortion => '🍳 ${l.sourceRecipe}',
       MealSource.camera => null,
     };
     if (label == null) return const SizedBox.shrink();
@@ -599,36 +611,20 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    final l = AppLocalizations.of(context);
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.restaurant_menu, size: 64, color: AppColors.subtle),
-          SizedBox(height: 16),
-          Text('No meals yet',
-              style: TextStyle(color: AppColors.subtle, fontSize: 16)),
-          SizedBox(height: 8),
-          Text('Take a photo to log your first meal',
-              style: TextStyle(color: AppColors.subtle, fontSize: 13)),
+          const Icon(Icons.restaurant_menu, size: 64, color: AppColors.subtle),
+          const SizedBox(height: 16),
+          Text(l.historyEmptyTitle,
+              style: const TextStyle(color: AppColors.subtle, fontSize: 16)),
+          const SizedBox(height: 8),
+          Text(l.historyEmptySubtitle,
+              style: const TextStyle(color: AppColors.subtle, fontSize: 13)),
         ],
       ),
     );
   }
 }
-
-String _mealTypeLabel(MealType? type) => switch (type) {
-      MealType.breakfast => 'Breakfast',
-      MealType.lunch => 'Lunch',
-      MealType.dinner => 'Dinner',
-      MealType.snack => 'Snack',
-      null => '',
-    };
-
-// Used for filter chips where the type is kept as a raw DB column value.
-String _typeFilterLabel(String type) => switch (type) {
-      'breakfast' => 'Breakfast',
-      'lunch' => 'Lunch',
-      'dinner' => 'Dinner',
-      'snack' => 'Snack',
-      _ => type,
-    };

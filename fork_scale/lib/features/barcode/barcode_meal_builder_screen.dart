@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/enums.dart';
 import '../../models/meal.dart';
 import '../../models/meal_item.dart';
@@ -123,7 +124,7 @@ class _BarcodeMealBuilderScreenState
   Future<void> _logMeal() async {
     if (_items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add at least one item first')),
+        SnackBar(content: Text(AppLocalizations.of(context).builderAddItemFirst)),
       );
       return;
     }
@@ -176,9 +177,10 @@ class _BarcodeMealBuilderScreenState
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Build meal'),
+        title: Text(l.builderTitle),
         leading: BackButton(onPressed: () => context.pop()),
       ),
       body: Column(
@@ -197,12 +199,12 @@ class _BarcodeMealBuilderScreenState
                       ),
                     ),
                 if (_items.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
                     child: Center(
                       child: Text(
-                        'No items yet — scan a barcode or add manually',
-                        style: TextStyle(color: AppColors.subtle),
+                        l.builderEmpty,
+                        style: const TextStyle(color: AppColors.subtle),
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -214,7 +216,7 @@ class _BarcodeMealBuilderScreenState
                       child: OutlinedButton.icon(
                         onPressed: _scanItem,
                         icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('Scan barcode'),
+                        label: Text(l.captureScanBarcode),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -222,7 +224,7 @@ class _BarcodeMealBuilderScreenState
                       child: OutlinedButton.icon(
                         onPressed: _addManually,
                         icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Add manually'),
+                        label: Text(l.builderAddManually),
                       ),
                     ),
                   ],
@@ -236,9 +238,9 @@ class _BarcodeMealBuilderScreenState
                 TextField(
                   controller: _notesCtrl,
                   maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes (optional)',
-                    prefixIcon: Icon(Icons.notes_outlined),
+                  decoration: InputDecoration(
+                    labelText: l.resultsNotesLabel,
+                    prefixIcon: const Icon(Icons.notes_outlined),
                   ),
                 ),
                 const SizedBox(height: 80),
@@ -257,12 +259,12 @@ class _BarcodeMealBuilderScreenState
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '${_items.length} item${_items.length == 1 ? '' : 's'}',
+                        l.builderItemCount(_items.length),
                         style:
                             const TextStyle(color: Colors.white70, fontSize: 12),
                       ),
                       Text(
-                        '${_totalKcal.round()} kcal total',
+                        l.builderTotalKcal(_totalKcal.round()),
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -286,7 +288,7 @@ class _BarcodeMealBuilderScreenState
                                 color: Colors.white, strokeWidth: 2),
                           )
                         : const Icon(Icons.check),
-                    label: const Text('Log meal'),
+                    label: Text(l.logPortionLogMeal),
                   ),
                 ],
               ),
@@ -400,7 +402,8 @@ class _ItemCardState extends State<_ItemCard> {
                       ),
                       const Spacer(),
                       Text(
-                        '${widget.item.totalKcal.round()} kcal',
+                        AppLocalizations.of(context)
+                            .kcalValue(widget.item.totalKcal.round()),
                         style: const TextStyle(
                           color: AppColors.accent,
                           fontWeight: FontWeight.bold,
@@ -457,8 +460,8 @@ class _ManualItemSheetState extends State<_ManualItemSheet> {
   void _submit() {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Name is required')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLocalizations.of(context).barcodeNameRequired)));
       return;
     }
     final kcal = double.tryParse(_kcalCtrl.text) ?? 0;
@@ -470,6 +473,7 @@ class _ManualItemSheetState extends State<_ManualItemSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(
           16, 16, 16, MediaQuery.of(context).viewInsets.bottom + 16),
@@ -487,7 +491,7 @@ class _ManualItemSheetState extends State<_ManualItemSheet> {
           TextField(
             controller: _nameCtrl,
             autofocus: true,
-            decoration: const InputDecoration(labelText: 'Product name *'),
+            decoration: InputDecoration(labelText: l.barcodeProductNameStar),
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 12),
@@ -498,8 +502,8 @@ class _ManualItemSheetState extends State<_ManualItemSheet> {
                   controller: _kcalCtrl,
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    labelText: 'kcal / 100 g',
+                  decoration: InputDecoration(
+                    labelText: l.ingredientKcalPer100g,
                     suffixText: 'kcal',
                   ),
                 ),
@@ -535,7 +539,7 @@ class _ManualItemSheetState extends State<_ManualItemSheet> {
             child: FilledButton.icon(
               onPressed: _nameCtrl.text.trim().isEmpty ? null : _submit,
               icon: const Icon(Icons.add),
-              label: const Text('Add item'),
+              label: Text(l.resultsAddItem),
             ),
           ),
         ],

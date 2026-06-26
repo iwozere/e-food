@@ -5,12 +5,17 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/recipe.dart';
 import '../../models/recipe_item.dart';
 import 'log_portion_sheet.dart';
 
 final _recipeProvider = FutureProvider.autoDispose.family<Recipe?, int>(
-  (ref, id) => ref.read(recipesRepositoryProvider).getRecipe(id),
+  (ref, id) {
+    // Refetch automatically after any recipe write (e.g. returning from edit).
+    ref.watch(recipesChangesProvider);
+    return ref.read(recipesRepositoryProvider).getRecipe(id);
+  },
 );
 
 class RecipeDetailScreen extends ConsumerWidget {
@@ -20,37 +25,32 @@ class RecipeDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final recipeAsync = ref.watch(_recipeProvider(recipeId));
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
         title: recipeAsync.valueOrNull != null
             ? Text(recipeAsync.valueOrNull!.name)
-            : const Text('Recipe'),
+            : Text(l.recipeDetailFallbackTitle),
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
           if (recipeAsync.valueOrNull != null)
             IconButton(
               icon: const Icon(Icons.edit_outlined),
-              onPressed: () async {
-                await context.push('/recipes/$recipeId/edit');
-                ref.invalidate(_recipeProvider(recipeId));
-              },
-              tooltip: 'Edit recipe',
+              onPressed: () => context.push('/recipes/$recipeId/edit'),
+              tooltip: l.mealDetailEditRecipe,
             ),
         ],
       ),
       body: recipeAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(l.commonError('$e'))),
         data: (recipe) => recipe == null
-            ? const Center(child: Text('Recipe not found'))
+            ? Center(child: Text(l.recipeDetailNotFound))
             : _RecipeDetail(
                 recipe: recipe,
                 onLogPortion: () => _showLogSheet(context, recipe),
-                onEdit: () async {
-                  await context.push('/recipes/$recipeId/edit');
-                  ref.invalidate(_recipeProvider(recipeId));
-                },
+                onEdit: () => context.push('/recipes/$recipeId/edit'),
               ),
       ),
     );
@@ -80,6 +80,7 @@ class _RecipeDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return CustomScrollView(
       slivers: [
         if (recipe.photoPath != null)
@@ -96,26 +97,26 @@ class _RecipeDetail extends StatelessWidget {
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, runSpacing: 6, children: [
                   _Chip(
-                    label: '${recipe.kcalPer100g.round()} kcal/100g',
+                    label: l.recipeKcalPer100g(recipe.kcalPer100g.round()),
                     color: AppColors.accent,
                   ),
                   _Chip(
-                    label: 'Yield: ${recipe.yieldG.round()} g',
+                    label: l.recipeYield(recipe.yieldG.round()),
                     color: AppColors.primary,
                   ),
                   if (recipe.totalProteinG != null)
                     _Chip(
-                      label: 'P ${recipe.totalProteinG!.round()} g',
+                      label: '${l.macroAbbrevProtein} ${l.gramsValue(recipe.totalProteinG!.round())}',
                       color: AppColors.primary,
                     ),
                   if (recipe.totalCarbsG != null)
                     _Chip(
-                      label: 'C ${recipe.totalCarbsG!.round()} g',
+                      label: '${l.macroAbbrevCarbs} ${l.gramsValue(recipe.totalCarbsG!.round())}',
                       color: AppColors.primary,
                     ),
                   if (recipe.totalFatG != null)
                     _Chip(
-                      label: 'F ${recipe.totalFatG!.round()} g',
+                      label: '${l.macroAbbrevFat} ${l.gramsValue(recipe.totalFatG!.round())}',
                       color: AppColors.primary,
                     ),
                 ]),
@@ -128,26 +129,25 @@ class _RecipeDetail extends StatelessWidget {
             ),
           ),
         ),
-        const SliverToBoxAdapter(
+        SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
-            child: Text('Ingredients',
-                style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+            child: Text(l.mealDetailIngredients,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
         ),
         SliverList.builder(
           itemCount: recipe.items.length,
           itemBuilder: (context, i) {
             final item = recipe.items[i];
-            final macroLine = _macroLine(item);
+            final macroLine = _macroLine(l, item);
             return ListTile(
               title: Text(item.name),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                      '${item.weightG.round()} g · ${item.kcalPer100g.round()} kcal/100g'),
+                  Text(l.mealDetailItemSubtitle(
+                      item.weightG.round(), item.kcalPer100g.round())),
                   if (macroLine != null)
                     Text(macroLine,
                         style: const TextStyle(
@@ -155,7 +155,7 @@ class _RecipeDetail extends StatelessWidget {
                 ],
               ),
               trailing: Text(
-                '${item.totalKcal.round()} kcal',
+                l.kcalValue(item.totalKcal.round()),
                 style: const TextStyle(
                     color: AppColors.accent, fontWeight: FontWeight.bold),
               ),
@@ -171,7 +171,7 @@ class _RecipeDetail extends StatelessWidget {
                   child: FilledButton.icon(
                     onPressed: onLogPortion,
                     icon: const Icon(Icons.restaurant),
-                    label: const Text('Log a portion'),
+                    label: Text(l.recipeLogPortion),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -179,7 +179,7 @@ class _RecipeDetail extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onEdit,
                     icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Edit recipe'),
+                    label: Text(l.mealDetailEditRecipe),
                   ),
                 ),
               ],
@@ -193,11 +193,17 @@ class _RecipeDetail extends StatelessWidget {
 
 // Compact "P 18 g · C 90 g · F 12 g" line for an ingredient's macro totals.
 // Returns null when the item carries no macro data.
-String? _macroLine(RecipeItem item) {
+String? _macroLine(AppLocalizations l, RecipeItem item) {
   final parts = <String>[];
-  if (item.totalProteinG != null) parts.add('P ${item.totalProteinG!.round()} g');
-  if (item.totalCarbsG != null) parts.add('C ${item.totalCarbsG!.round()} g');
-  if (item.totalFatG != null) parts.add('F ${item.totalFatG!.round()} g');
+  if (item.totalProteinG != null) {
+    parts.add('${l.macroAbbrevProtein} ${l.gramsValue(item.totalProteinG!.round())}');
+  }
+  if (item.totalCarbsG != null) {
+    parts.add('${l.macroAbbrevCarbs} ${l.gramsValue(item.totalCarbsG!.round())}');
+  }
+  if (item.totalFatG != null) {
+    parts.add('${l.macroAbbrevFat} ${l.gramsValue(item.totalFatG!.round())}');
+  }
   return parts.isEmpty ? null : parts.join(' · ');
 }
 

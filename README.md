@@ -1,5 +1,7 @@
 # ForkScale
 
+![Flutter CI](https://github.com/iwozere/e-food/actions/workflows/flutter-ci.yml/badge.svg)
+
 A mobile app (iOS + Android) that estimates the calories in a meal from a single photo. Place a **fork or knife** beside the plate as a physical scale reference, snap a picture, and get an ingredient-by-ingredient calorie breakdown in under five seconds — all stored locally, no account required.
 
 ---
@@ -24,7 +26,7 @@ A mobile app (iOS + Android) that estimates the calories in a meal from a single
 | Vision AI | Gemini 2.5 Flash (cloud) | Reliable JSON output; free tier covers personal use |
 | Nutrition data | USDA FoodData Central SQLite (~30 MB, bundled) | AI hallucinates kcal values; USDA is authoritative |
 | Local storage | sqflite (SQLite) + `path_provider` | Structured queries, full-text search, no cloud sync |
-| Image pipeline | `image` package in background `Isolate` | Resize to 800 px for API call, 1200 px for storage, off the main thread |
+| Image pipeline | `image` package in background `Isolate` | Resize to 1536 px for API call, 1200 px for storage, off the main thread |
 | API key storage | Flutter Secure Storage (Keychain / Keystore) | OS secure enclave; never written to disk in plaintext |
 
 For the full rationale behind these choices, including trade-offs considered and options rejected, see [docs/architecture-decisions.md](docs/architecture-decisions.md).

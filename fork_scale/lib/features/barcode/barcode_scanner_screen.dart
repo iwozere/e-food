@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 class BarcodeScannerScreen extends StatefulWidget {
   final bool forRecipe;
@@ -32,7 +33,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     // Basic EAN/UPC sanity: digits only, 8–14 chars.
     if (!RegExp(r'^\d{8,14}$').hasMatch(raw)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not read barcode — try again')),
+        SnackBar(content: Text(AppLocalizations.of(context).barcodeScanError)),
       );
       return;
     }
@@ -56,12 +57,13 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('Scan barcode'),
+        title: Text(l.captureScanBarcode),
         leading: BackButton(onPressed: () => context.pop()),
       ),
       body: Stack(
@@ -81,11 +83,11 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
               ),
             ),
           ),
-          const Align(
-            alignment: Alignment(0, 0.55),
+          Align(
+            alignment: const Alignment(0, 0.55),
             child: Text(
-              'Point at the barcode on the package',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+              l.barcodeScanHint,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
           ),
         ],

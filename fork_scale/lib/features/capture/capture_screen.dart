@@ -1,20 +1,20 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 
-import '../../core/services/gemini_service.dart';
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
-import '../../models/analysis_result.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/enums.dart';
 import '../../models/meal.dart';
+import '../../widgets/utensil_icons.dart';
+import 'capture_controller.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   const CaptureScreen({super.key});
@@ -39,6 +39,32 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     WidgetsBinding.instance.addObserver(this);
     _initCamera();
     _loadDefaultUtensil();
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _maybeShowPrivacyDisclosure());
+  }
+
+  /// One-time disclosure that analysed photos are sent to Google Gemini. Shown
+  /// before the first capture; acknowledgement persisted so it never re-shows.
+  Future<void> _maybeShowPrivacyDisclosure() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('privacy_ack') ?? false) return;
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.privacyTitle),
+        content: Text(l.privacyBody),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l.privacyAccept),
+          ),
+        ],
+      ),
+    );
+    await prefs.setBool('privacy_ack', true);
   }
 
   Future<void> _loadDefaultUtensil() async {
@@ -67,7 +93,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
-        if (mounted) setState(() => _errorMessage = 'No camera available on this device.');
+        if (mounted) {
+          setState(() =>
+              _errorMessage = AppLocalizations.of(context).captureNoCamera);
+        }
         return;
       }
       final controller = CameraController(
@@ -79,7 +108,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         await controller.initialize();
       } catch (e) {
         await controller.dispose();
-        if (mounted) setState(() => _errorMessage = 'Camera failed to start: $e');
+        if (mounted) {
+          setState(() => _errorMessage =
+              AppLocalizations.of(context).captureCameraFailed('$e'));
+        }
         return;
       }
       if (!mounted) {
@@ -116,8 +148,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     // Await the FutureProvider so we always get the resolved key, not the
     // AsyncLoading null that exists for a brief moment after a cold start.
     await ref.read(geminiApiKeyProvider.future);
-    final gemini = ref.read(geminiServiceProvider);
-    if (gemini == null) {
+    final controller = ref.read(captureControllerProvider);
+    if (controller == null) {
       _showApiKeyError();
       return;
     }
@@ -125,69 +157,46 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     _pendingSavedPath = null;
     setState(() => _isAnalysing = true);
     try {
-      final imageService = ref.read(imageServiceProvider);
-      final filename = '${const Uuid().v4()}.jpg';
-
-      final (:apiBytes, :savedPath) =
-          await imageService.processCapture(file, filename: filename);
-      _pendingSavedPath = savedPath;
-
       final lengths = await ref.read(utensilLengthsProvider.future);
       final lengthCm = lengths[_utensil.name] ?? 18.5;
-
-      final result = await gemini.analyzeImage(
-        imageBytes: apiBytes,
-        utensil: _utensil.name,
+      final outcome = await controller.analyze(
+        source: file,
+        utensil: _utensil,
         utensilLengthCm: lengthCm,
       );
-
-      _pendingSavedPath = null;
       if (!mounted) return;
-      context.push(
-        '/results',
-        extra: AnalysisResult(
-          utensilDetected: result.utensilDetected,
-          scaleConfidence: result.scaleConfidence,
-          items: result.items,
-          totalKcal: result.totalKcal,
-          notes: result.notes,
-          photoPath: savedPath,
-          utensil: _utensil.name,
-        ),
-      );
-    } on TimeoutException {
-      _showRetryError('Request timed out — save photo for later?');
-    } on GeminiRateLimitException {
-      _showRetryError('Rate limit reached — save photo for later?');
-    } on GeminiApiException catch (e) {
-      if (e.statusCode == 401 || e.statusCode == 403) {
-        _discardPendingPhoto();
-        _showApiKeyError();
-      } else if (e.statusCode == 503) {
-        _showRetryError('Gemini is overloaded — save photo for later?');
-      } else {
-        _discardPendingPhoto();
-        _showError('API error (${e.statusCode}).', detail: e.body);
-      }
-    } on GeminiParseException catch (e) {
-      _discardPendingPhoto();
-      final msg = e.truncated
-          ? 'Response was cut off — please retake the photo.'
-          : 'Could not read results — please retake the photo.';
-      _showError(msg, detail: e.rawText);
-    } catch (e) {
-      _discardPendingPhoto();
-      _showError('An unexpected error occurred.', detail: e.toString());
+      _handleOutcome(outcome);
     } finally {
       if (mounted) setState(() => _isAnalysing = false);
     }
   }
 
-  void _discardPendingPhoto() {
-    final path = _pendingSavedPath;
-    if (path == null) return;
-    _pendingSavedPath = null;
-    ref.read(imageServiceProvider).deletePhoto(path);
+  void _handleOutcome(CaptureOutcome outcome) {
+    final l = AppLocalizations.of(context);
+    switch (outcome) {
+      case CaptureSuccess(:final result):
+        context.push('/results', extra: result);
+      case CaptureApiKeyError():
+        _showApiKeyError();
+      case CaptureRetryable(:final reason, :final savedPath):
+        _pendingSavedPath = savedPath;
+        _showRetryError(switch (reason) {
+          CaptureRetryReason.timeout => l.captureTimedOut,
+          CaptureRetryReason.rateLimit => l.captureRateLimit,
+          CaptureRetryReason.overloaded => l.captureOverloaded,
+        });
+      case CaptureError(:final kind, :final statusCode, :final detail):
+        _showError(
+          switch (kind) {
+            CaptureErrorKind.apiError =>
+              l.captureApiError(statusCode ?? 0),
+            CaptureErrorKind.responseCutOff => l.captureResponseCutOff,
+            CaptureErrorKind.couldNotRead => l.captureCouldNotRead,
+            CaptureErrorKind.unexpected => l.captureUnexpectedError,
+          },
+          detail: detail,
+        );
+    }
   }
 
   void _showRetryError(String message) {
@@ -197,7 +206,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         content: Text(message),
         duration: const Duration(seconds: 8),
         action: _pendingSavedPath != null
-            ? SnackBarAction(label: 'Save for later', onPressed: _savePending)
+            ? SnackBarAction(
+                label: AppLocalizations.of(context).captureSaveForLater,
+                onPressed: _savePending)
             : null,
       ),
     );
@@ -207,22 +218,16 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     final path = _pendingSavedPath;
     if (path == null) return;
     _pendingSavedPath = null;
-    final repo = ref.read(mealsRepositoryProvider);
-    await repo.insertMeal(Meal(
-      createdAt: DateTime.now(),
-      photoPath: path,
-      totalKcal: 0,
-      utensil: _utensil,
-      modelUsed: 'gemini',
-      mealType: Meal.detectTypeFromTime(),
-      pending: true,
-    ));
+    final controller = ref.read(captureControllerProvider);
+    if (controller == null) return;
+    await controller.saveForLater(savedPath: path, utensil: _utensil);
     if (!mounted) return;
+    final l = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Photo saved — analyze it any time from History.'),
+        content: Text(l.capturePhotoSaved),
         action: SnackBarAction(
-          label: 'History',
+          label: l.navHistory,
           onPressed: () => context.go('/history'),
         ),
       ),
@@ -230,11 +235,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   }
 
   void _showApiKeyError() {
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Gemini API key missing or invalid.'),
+        content: Text(l.captureApiKeyMissing),
         action: SnackBarAction(
-          label: 'Settings',
+          label: l.navSettings,
           onPressed: () => context.go('/settings'),
         ),
       ),
@@ -242,12 +249,16 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   }
 
   void _showError(String message, {String? detail}) {
+    // Raw API bodies / model text can contain sensitive request echoes, so the
+    // diagnostics dialog is only offered in debug builds. Release users see the
+    // friendly message only.
+    final showDetail = detail != null && kDebugMode;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        action: detail != null
+        action: showDetail
             ? SnackBarAction(
-                label: 'Details',
+                label: AppLocalizations.of(context).actionDetails,
                 onPressed: () => _showErrorDetail(message, detail),
               )
             : null,
@@ -256,10 +267,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   }
 
   void _showErrorDetail(String message, String detail) {
+    final l = AppLocalizations.of(context);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Error detail'),
+        title: Text(l.captureErrorDetail),
         content: SingleChildScrollView(
           child: SelectableText(
             detail,
@@ -272,14 +284,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
               Clipboard.setData(ClipboardData(text: '$message\n\n$detail'));
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Copied to clipboard')),
+                SnackBar(content: Text(l.captureCopied)),
               );
             },
-            child: const Text('Copy'),
+            child: Text(l.actionCopy),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+            child: Text(l.actionClose),
           ),
         ],
       ),
@@ -330,7 +342,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                 _InstructionBanner(),
                 IconButton(
                   icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
-                  tooltip: 'Scan barcode',
+                  tooltip: AppLocalizations.of(context).captureScanBarcode,
                   onPressed: () => context.push('/scan'),
                 ),
               ],
@@ -370,15 +382,15 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   Widget _buildAnalysingOverlay() {
     return Container(
       color: Colors.black54,
-      child: const Center(
+      child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: AppColors.accent),
-            SizedBox(height: 16),
+            const CircularProgressIndicator(color: AppColors.accent),
+            const SizedBox(height: 16),
             Text(
-              'Analysing…',
-              style: TextStyle(color: Colors.white, fontSize: 18),
+              AppLocalizations.of(context).captureAnalysing,
+              style: const TextStyle(color: Colors.white, fontSize: 18),
             ),
           ],
         ),
@@ -406,13 +418,17 @@ class _RecentMealsData {
 class _RecentMealsStrip extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final dataAsync = ref.watch(_recentMealsProvider);
     final meals = dataAsync.valueOrNull?.recent ?? <Meal>[];
     final todayNames = dataAsync.valueOrNull?.todayNames ?? <String>{};
     if (meals.isEmpty) return const SizedBox.shrink();
 
+    // Grow the strip with the user's text scale so the chips never clip at
+    // large accessibility font sizes (capped so it can't dominate the screen).
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.6);
     return SizedBox(
-      height: 44,
+      height: 44 * textScale,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -435,7 +451,7 @@ class _RecentMealsStrip extends ConsumerWidget {
                           .copyMealToToday(meal);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('$name logged')),
+                          SnackBar(content: Text(l.captureMealLogged(name))),
                         );
                       }
                     },
@@ -460,7 +476,7 @@ class _RecentMealsStrip extends ConsumerWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    loggedToday ? 'Logged today' : '$kcal kcal',
+                    loggedToday ? l.captureLoggedToday : l.captureKcal(kcal),
                     style: TextStyle(
                       color: loggedToday ? Colors.white38 : AppColors.accent,
                       fontSize: 11,
@@ -485,9 +501,9 @@ class _InstructionBanner extends StatelessWidget {
         color: Colors.black54,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: const Text(
-        'Place utensil beside the plate as scale',
-        style: TextStyle(color: Colors.white, fontSize: 12),
+      child: Text(
+        AppLocalizations.of(context).captureHint,
+        style: const TextStyle(color: Colors.white, fontSize: 12),
       ),
     );
   }
@@ -520,7 +536,7 @@ class _UtensilToggle extends StatelessWidget {
         children: [
           _Tab(
             label: Row(mainAxisSize: MainAxisSize.min, children: [
-              const _ForkIcon(size: 13),
+              const ForkIcon(size: 13),
               const SizedBox(width: 5),
               Text(_cm('fork'), style: _style),
             ]),
@@ -530,14 +546,22 @@ class _UtensilToggle extends StatelessWidget {
             onTap: onChanged,
           ),
           _Tab(
-            label: Text('🔪 ${_cm('knife')}', style: _style),
+            label: Row(mainAxisSize: MainAxisSize.min, children: [
+              const KnifeIcon(size: 13),
+              const SizedBox(width: 5),
+              Text(_cm('knife'), style: _style),
+            ]),
             semanticLabel: 'Knife ${_cm('knife')}',
             value: Utensil.knife,
             current: utensil,
             onTap: onChanged,
           ),
           _Tab(
-            label: Text('🥄 ${_cm('spoon')}', style: _style),
+            label: Row(mainAxisSize: MainAxisSize.min, children: [
+              const SpoonIcon(size: 13),
+              const SizedBox(width: 5),
+              Text(_cm('spoon'), style: _style),
+            ]),
             semanticLabel: 'Spoon ${_cm('spoon')}',
             value: Utensil.spoon,
             current: utensil,
@@ -595,7 +619,7 @@ class _ShutterButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: 'Take photo',
+      label: AppLocalizations.of(context).captureTakePhoto,
       child: GestureDetector(
         onTap: onTap,
         child: Container(
@@ -621,9 +645,10 @@ class _GalleryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Semantics(
       button: true,
-      label: 'Pick from gallery',
+      label: l.capturePickFromGallery,
       child: GestureDetector(
         onTap: onTap,
         child: Container(
@@ -634,8 +659,8 @@ class _GalleryButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.white38),
           ),
-          child: const Icon(Icons.photo_library, color: Colors.white,
-              semanticLabel: 'Gallery'),
+          child: Icon(Icons.photo_library,
+              color: Colors.white, semanticLabel: l.captureGallery),
         ),
       ),
     );
@@ -665,8 +690,8 @@ class _CameraGuide extends StatelessWidget {
           Positioned(
             left: cx - 18,
             top: cy - r - 22,
-            child: _badge(const Text('Plate',
-                style: TextStyle(color: Colors.white70, fontSize: 11))),
+            child: _badge(Text(AppLocalizations.of(context).capturePlate,
+                style: const TextStyle(color: Colors.white70, fontSize: 11))),
           ),
           Positioned(
             left: cx - r - 64,
@@ -679,11 +704,9 @@ class _CameraGuide extends StatelessWidget {
   }
 
   Widget get _utensilBadge => _badge(switch (utensil) {
-        Utensil.fork => const _ForkIcon(size: 11, color: Colors.white70),
-        Utensil.knife => const Text('🔪',
-            style: TextStyle(color: Colors.white70, fontSize: 11)),
-        Utensil.spoon => const Text('🥄',
-            style: TextStyle(color: Colors.white70, fontSize: 11)),
+        Utensil.fork => const ForkIcon(size: 11, color: Colors.white70),
+        Utensil.knife => const KnifeIcon(size: 11, color: Colors.white70),
+        Utensil.spoon => const SpoonIcon(size: 11, color: Colors.white70),
       });
 
   Widget _badge(Widget child) => Container(
@@ -725,52 +748,3 @@ class _GuidePainter extends CustomPainter {
       old.cx != cx || old.cy != cy || old.r != r;
 }
 
-// ── Fork icon (CustomPaint) ───────────────────────────────────────────────────
-// Used in the utensil toggle and camera guide badge. No standard fork-only
-// Unicode emoji exists, so we draw a 3-tine fork with a handle.
-
-class _ForkIcon extends StatelessWidget {
-  final double size;
-  final Color color;
-  const _ForkIcon({this.size = 14, this.color = Colors.white});
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size(size * 0.55, size),
-      painter: _ForkPainter(color: color),
-    );
-  }
-}
-
-class _ForkPainter extends CustomPainter {
-  final Color color;
-  const _ForkPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final sw = w * 0.20;
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = sw
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
-    // Handle: center, from bottom up to 55% height
-    canvas.drawLine(Offset(w / 2, h), Offset(w / 2, h * 0.52), paint);
-
-    // Shoulder: horizontal bridge connecting tines to handle
-    canvas.drawLine(Offset(sw / 2, h * 0.52), Offset(w - sw / 2, h * 0.52), paint);
-
-    // 3 tines evenly spaced across the width
-    for (var i = 0; i < 3; i++) {
-      final x = sw / 2 + (w - sw) * i / 2;
-      canvas.drawLine(Offset(x, h * 0.52), Offset(x, h * 0.05), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_ForkPainter old) => old.color != color;
-}

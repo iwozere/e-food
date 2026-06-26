@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/services/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 final _streakProvider = FutureProvider.autoDispose<int>(
   (ref) => ref.read(mealsRepositoryProvider).getCurrentStreak(),
@@ -53,9 +54,10 @@ class InsightsScreen extends ConsumerWidget {
     final daysLogged = ref.watch(_daysWithMealsProvider).valueOrNull;
     final macros7 = ref.watch(_avgMacros7Provider).valueOrNull;
     final macros30 = ref.watch(_avgMacros30Provider).valueOrNull;
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Insights')),
+      appBar: AppBar(title: Text(l.insightsTitle)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -70,14 +72,14 @@ class InsightsScreen extends ConsumerWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Current streak',
-                        style: TextStyle(color: AppColors.subtle, fontSize: 12),
+                      Text(
+                        l.insightsCurrentStreak,
+                        style: const TextStyle(color: AppColors.subtle, fontSize: 12),
                       ),
                       Text(
                         streak == 0
-                            ? 'No streak yet'
-                            : '$streak day${streak == 1 ? '' : 's'}',
+                            ? l.insightsNoStreak
+                            : l.insightsStreakDays(streak),
                         style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -98,21 +100,21 @@ class InsightsScreen extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const _SectionLabel('AVERAGE DAILY INTAKE'),
+                  _SectionLabel(l.insightsAvgIntake),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
                         child: _StatBox(
-                          label: 'Last 7 days',
-                          value: avg7 != null ? '${avg7.round()} kcal' : '—',
+                          label: l.insightsLast7,
+                          value: avg7 != null ? l.kcalValue(avg7.round()) : '—',
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: _StatBox(
-                          label: 'Last 30 days',
-                          value: avg30 != null ? '${avg30.round()} kcal' : '—',
+                          label: l.insightsLast30,
+                          value: avg30 != null ? l.kcalValue(avg30.round()) : '—',
                         ),
                       ),
                     ],
@@ -131,11 +133,11 @@ class InsightsScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const _SectionLabel('AVERAGE DAILY MACROS'),
+                    _SectionLabel(l.insightsAvgMacros),
                     const SizedBox(height: 12),
-                    _MacroRow(label: 'Last 7 days', macros: macros7),
+                    _MacroRow(label: l.insightsLast7, macros: macros7),
                     const SizedBox(height: 10),
-                    _MacroRow(label: 'Last 30 days', macros: macros30),
+                    _MacroRow(label: l.insightsLast30, macros: macros30),
                   ],
                 ),
               ),
@@ -149,22 +151,22 @@ class InsightsScreen extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const _SectionLabel('THIS WEEK'),
+                  _SectionLabel(l.insightsThisWeek),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
                         child: _StatBox(
-                          label: 'Days logged',
-                          value: daysLogged != null ? '$daysLogged / 7' : '—',
+                          label: l.insightsDaysLogged,
+                          value: daysLogged != null ? l.insightsOutOf7(daysLogged) : '—',
                           color: AppColors.primary,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: _StatBox(
-                          label: 'Over goal',
-                          value: daysOver != null ? '$daysOver / 7' : '—',
+                          label: l.insightsOverGoal,
+                          value: daysOver != null ? l.insightsOutOf7(daysOver) : '—',
                           color: (daysOver ?? 0) > 3
                               ? AppColors.error
                               : AppColors.accent,
@@ -186,7 +188,7 @@ class InsightsScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const _SectionLabel('MOST LOGGED MEALS'),
+                    _SectionLabel(l.insightsTopMeals),
                     const SizedBox(height: 8),
                     ...topMeals.asMap().entries.map(
                           (e) => Padding(
@@ -213,7 +215,7 @@ class InsightsScreen extends ConsumerWidget {
                                   ),
                                 ),
                                 Text(
-                                  '${e.value.count}×',
+                                  l.insightsCount(e.value.count),
                                   style: const TextStyle(
                                     color: AppColors.primary,
                                     fontWeight: FontWeight.bold,
@@ -222,7 +224,7 @@ class InsightsScreen extends ConsumerWidget {
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  '~${e.value.avgKcal.round()} kcal',
+                                  l.insightsApproxKcal(e.value.avgKcal.round()),
                                   style: const TextStyle(
                                     color: AppColors.subtle,
                                     fontSize: 12,
@@ -251,10 +253,12 @@ class _MacroRow extends StatelessWidget {
   final _Macros? macros;
   const _MacroRow({required this.label, required this.macros});
 
-  String _g(double? v) => v != null ? '${v.round()} g' : '—';
+  String _g(AppLocalizations l, double? v) =>
+      v != null ? l.gramsValue(v.round()) : '—';
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -265,19 +269,19 @@ class _MacroRow extends StatelessWidget {
           children: [
             Expanded(
               child: _StatBox(
-                  label: 'Protein',
-                  value: _g(macros?.protein),
+                  label: l.macroProtein,
+                  value: _g(l, macros?.protein),
                   color: AppColors.primary),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: _StatBox(label: 'Carbs', value: _g(macros?.carbs)),
+              child: _StatBox(label: l.macroCarbs, value: _g(l, macros?.carbs)),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _StatBox(
-                  label: 'Fat',
-                  value: _g(macros?.fat),
+                  label: l.macroFat,
+                  value: _g(l, macros?.fat),
                   color: AppColors.error),
             ),
           ],
