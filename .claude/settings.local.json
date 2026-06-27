@@ -22,7 +22,8 @@
       "Bash(dart format *)",
       "Bash(echo \"EXIT: $?\")",
       "Bash(flutter gen-l10n *)",
-      "Bash(grep -v '\\\\.dart$\\\\|test')"
+      "Bash(grep -v '\\\\.dart$\\\\|test')",
+      "Bash(dart run *)"
     ]
   }
 }

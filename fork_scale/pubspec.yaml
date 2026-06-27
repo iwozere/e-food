@@ -57,6 +57,7 @@ dev_dependencies:
   custom_lint: ^0.7.5
   riverpod_lint: ^2.6.5
   sqflite_common_ffi: ^2.3.4
+  flutter_launcher_icons: ^0.14.1
 
 flutter:
   uses-material-design: true
@@ -64,3 +65,14 @@ flutter:
   assets:
     - assets/db/usda_nutrition.db
     - assets/db/sfcd.db
+
+# App launcher icon (regenerate masters via scripts/build_app_icon.py, then run
+# `dart run flutter_launcher_icons`).
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  adaptive_icon_background: "#1B4332"
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
+  min_sdk_android: 21
