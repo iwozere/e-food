@@ -10,6 +10,13 @@ class AppDatabase {
   static Database? _usda;
   static Database? _sfcd;
 
+  /// Bump these whenever a bundled read-only asset DB is rebuilt so that an
+  /// existing (stale) copy in the documents directory is overwritten on next
+  /// open. Without this, [_copyAssetIfStale] would keep an old schema forever
+  /// because the destination file already exists.
+  static const int _usdaAssetVersion = 2; // v2: added protein/carbs/fat columns
+  static const int _sfcdAssetVersion = 1;
+
   /// False when running under sqflite_common_ffi (unit tests), which lacks FTS4.
   static bool hasFts = true;
 
@@ -257,14 +264,34 @@ class AppDatabase {
     hasFts = true;
   }
 
+  /// Copies a bundled asset DB into the documents directory, overwriting any
+  /// existing copy whose recorded version differs from [assetVersion]. A sibling
+  /// `<dest>.version` file records the version of the copy on disk; when the
+  /// bundled asset is rebuilt and its [assetVersion] bumped, the stale copy is
+  /// replaced instead of being kept forever (which previously stranded users on
+  /// an old schema, e.g. a `foods` table without the macro columns).
+  static Future<void> _copyAssetIfStale(
+    String assetPath,
+    String dest,
+    int assetVersion,
+  ) async {
+    final versionFile = File('$dest.version');
+    final fresh = File(dest).existsSync() &&
+        versionFile.existsSync() &&
+        int.tryParse(await versionFile.readAsString().then((s) => s.trim())) ==
+            assetVersion;
+    if (fresh) return;
+    final data = await rootBundle.load(assetPath);
+    final bytes = data.buffer.asUint8List();
+    await File(dest).writeAsBytes(bytes, flush: true);
+    await versionFile.writeAsString('$assetVersion', flush: true);
+  }
+
   static Future<Database> _openUsdaDb() async {
     final dir = await getApplicationDocumentsDirectory();
     final dest = p.join(dir.path, 'usda_nutrition.db');
-    if (!File(dest).existsSync()) {
-      final data = await rootBundle.load('assets/db/usda_nutrition.db');
-      final bytes = data.buffer.asUint8List();
-      await File(dest).writeAsBytes(bytes, flush: true);
-    }
+    await _copyAssetIfStale(
+        'assets/db/usda_nutrition.db', dest, _usdaAssetVersion);
     return openDatabase(dest, readOnly: true);
   }
 
@@ -275,11 +302,7 @@ class AppDatabase {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final dest = p.join(dir.path, 'sfcd.db');
-      if (!File(dest).existsSync()) {
-        final data = await rootBundle.load('assets/db/sfcd.db');
-        final bytes = data.buffer.asUint8List();
-        await File(dest).writeAsBytes(bytes, flush: true);
-      }
+      await _copyAssetIfStale('assets/db/sfcd.db', dest, _sfcdAssetVersion);
       _sfcd = await openDatabase(dest, readOnly: true);
       return _sfcd;
     } catch (_) {
