@@ -27,7 +27,7 @@ class BackupService {
 
     final dbFile = File(p.join(docs.path, 'fork_scale.db'));
     if (dbFile.existsSync()) {
-      encoder.addFile(dbFile, 'fork_scale.db');
+      await encoder.addFile(dbFile, 'fork_scale.db');
     }
 
     final photosDir = Directory(p.join(docs.path, 'meal_photos'));
@@ -35,18 +35,20 @@ class BackupService {
       await for (final entity in photosDir.list(recursive: true)) {
         if (entity is File) {
           final rel = p.relative(entity.path, from: docs.path);
-          encoder.addFile(entity, rel);
+          await encoder.addFile(entity, rel);
         }
       }
     }
 
-    encoder.close();
+    await encoder.close();
 
-    await Share.shareXFiles([XFile(zipPath)], subject: 'ForkScale backup');
+    await SharePlus.instance.share(
+      ShareParams(files: [XFile(zipPath)], subject: 'ForkScale backup'),
+    );
   }
 
   static Future<bool> restoreBackup() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['zip'],
     );
@@ -66,7 +68,7 @@ class BackupService {
 
     // Use streaming decode to avoid loading the entire zip into memory at once.
     final inputStream = InputFileStream(zipPath);
-    final archive = ZipDecoder().decodeBuffer(inputStream);
+    final archive = ZipDecoder().decodeStream(inputStream);
 
     await extractArchive(archive, docs.path);
 

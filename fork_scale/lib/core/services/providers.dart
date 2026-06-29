@@ -14,9 +14,10 @@ import 'usda_service.dart';
 /// The Gemini API key is a sensitive credential, so it is kept in the OS secure
 /// store (Keychain / EncryptedSharedPreferences) rather than plaintext prefs.
 const geminiKeyStorageKey = 'gemini_api_key';
-const geminiKeyStorage = FlutterSecureStorage(
-  aOptions: AndroidOptions(encryptedSharedPreferences: true),
-);
+// flutter_secure_storage v10 deprecated EncryptedSharedPreferences (the Jetpack
+// Security library Google retired); the plugin now uses its own ciphers and
+// migrates existing values automatically on first access, so no options needed.
+const geminiKeyStorage = FlutterSecureStorage();
 
 final geminiApiKeyProvider = FutureProvider<String?>((ref) async {
   // Preferred location: secure storage.
@@ -39,8 +40,8 @@ final geminiApiKeyProvider = FutureProvider<String?>((ref) async {
 
 final geminiServiceProvider = Provider<GeminiService?>((ref) {
   final keyAsync = ref.watch(geminiApiKeyProvider);
-  return keyAsync.valueOrNull != null
-      ? GeminiService(apiKey: keyAsync.valueOrNull!)
+  return keyAsync.value != null
+      ? GeminiService(apiKey: keyAsync.value!)
       : null;
 });
 

@@ -359,7 +359,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                 _UtensilToggle(
                   utensil: _utensil,
                   onChanged: (v) => setState(() => _utensil = v),
-                  lengths: ref.watch(utensilLengthsProvider).valueOrNull ??
+                  lengths: ref.watch(utensilLengthsProvider).value ??
                       {'fork': 18.5, 'knife': 21.0, 'spoon': 20.0},
                 ),
                 const SizedBox(height: 24),
@@ -420,8 +420,8 @@ class _RecentMealsStrip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppLocalizations.of(context);
     final dataAsync = ref.watch(_recentMealsProvider);
-    final meals = dataAsync.valueOrNull?.recent ?? <Meal>[];
-    final todayNames = dataAsync.valueOrNull?.todayNames ?? <String>{};
+    final meals = dataAsync.value?.recent ?? <Meal>[];
+    final todayNames = dataAsync.value?.todayNames ?? <String>{};
     if (meals.isEmpty) return const SizedBox.shrink();
 
     // Grow the strip with the user's text scale so the chips never clip at

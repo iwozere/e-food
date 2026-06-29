@@ -21,14 +21,14 @@ class ResultsScreen extends ConsumerStatefulWidget {
 }
 
 class _ResultsScreenState extends ConsumerState<ResultsScreen> {
-  late final AutoDisposeStateNotifierProvider<ResultsNotifier, ResultsState> _provider;
+  late final NotifierProvider<ResultsNotifier, ResultsState> _provider;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _provider = StateNotifierProvider.autoDispose<ResultsNotifier, ResultsState>(
-      (ref) => ResultsNotifier(widget.result),
+    _provider = NotifierProvider.autoDispose<ResultsNotifier, ResultsState>(
+      () => ResultsNotifier(widget.result),
     );
   }
 
@@ -86,7 +86,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
 }
 
 class _ResultsBody extends ConsumerWidget {
-  final AutoDisposeStateNotifierProvider<ResultsNotifier, ResultsState> provider;
+  final NotifierProvider<ResultsNotifier, ResultsState> provider;
   final Future<void> Function(ResultsState) onSave;
   final bool saving;
 

@@ -29,12 +29,12 @@ class RecipeDetailScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: recipeAsync.valueOrNull != null
-            ? Text(recipeAsync.valueOrNull!.name)
+        title: recipeAsync.value != null
+            ? Text(recipeAsync.value!.name)
             : Text(l.recipeDetailFallbackTitle),
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
-          if (recipeAsync.valueOrNull != null)
+          if (recipeAsync.value != null)
             IconButton(
               icon: const Icon(Icons.edit_outlined),
               onPressed: () => context.push('/recipes/$recipeId/edit'),

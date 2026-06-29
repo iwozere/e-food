@@ -211,9 +211,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final l = AppLocalizations.of(context);
     try {
       final path = await ref.read(mealsRepositoryProvider).exportCsv();
-      await Share.shareXFiles(
-        [XFile(path)],
-        subject: 'ForkScale meal history',
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(path)],
+          subject: 'ForkScale meal history',
+        ),
       );
     } catch (e) {
       messenger.showSnackBar(
