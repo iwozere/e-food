@@ -119,7 +119,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final mealAsync = ref.watch(_mealProvider(widget.mealId));
-    final meal = mealAsync.valueOrNull;
+    final meal = mealAsync.value;
     final l = AppLocalizations.of(context);
 
     return Scaffold(
@@ -404,7 +404,7 @@ class _RecipePortionDetail extends ConsumerWidget {
     final recipeAsync = meal.recipeId != null
         ? ref.watch(_recipeForMealProvider(meal.recipeId!))
         : const AsyncData<Recipe?>(null);
-    final recipe = recipeAsync.valueOrNull;
+    final recipe = recipeAsync.value;
     final l = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context).toLanguageTag();
 

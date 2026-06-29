@@ -52,7 +52,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final dayTotalAsync = ref.watch(historyDayTotalProvider);
     final weeklyAsync = ref.watch(historyWeeklyKcalProvider);
     final goal =
-        (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
+        (ref.watch(dailyGoalProvider).value ?? 2000).toDouble();
     final l = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context).toLanguageTag();
 
@@ -295,8 +295,8 @@ class _DaySummaryBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final goal =
-        (ref.watch(dailyGoalProvider).valueOrNull ?? 2000).toDouble();
-    final total = dayTotalAsync.valueOrNull ?? 0.0;
+        (ref.watch(dailyGoalProvider).value ?? 2000).toDouble();
+    final total = dayTotalAsync.value ?? 0.0;
     final fraction = (total / goal).clamp(0.0, 1.0);
     final overGoal = total > goal;
     final l = AppLocalizations.of(context);

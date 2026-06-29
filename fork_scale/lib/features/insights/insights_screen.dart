@@ -46,14 +46,14 @@ class InsightsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final streak = ref.watch(_streakProvider).valueOrNull ?? 0;
-    final avg7 = ref.watch(_avgKcal7Provider).valueOrNull;
-    final avg30 = ref.watch(_avgKcal30Provider).valueOrNull;
-    final topMeals = ref.watch(_topMealsProvider).valueOrNull ?? [];
-    final daysOver = ref.watch(_daysOverGoalProvider).valueOrNull;
-    final daysLogged = ref.watch(_daysWithMealsProvider).valueOrNull;
-    final macros7 = ref.watch(_avgMacros7Provider).valueOrNull;
-    final macros30 = ref.watch(_avgMacros30Provider).valueOrNull;
+    final streak = ref.watch(_streakProvider).value ?? 0;
+    final avg7 = ref.watch(_avgKcal7Provider).value;
+    final avg30 = ref.watch(_avgKcal30Provider).value;
+    final topMeals = ref.watch(_topMealsProvider).value ?? [];
+    final daysOver = ref.watch(_daysOverGoalProvider).value;
+    final daysLogged = ref.watch(_daysWithMealsProvider).value;
+    final macros7 = ref.watch(_avgMacros7Provider).value;
+    final macros30 = ref.watch(_avgMacros30Provider).value;
     final l = AppLocalizations.of(context);
 
     return Scaffold(

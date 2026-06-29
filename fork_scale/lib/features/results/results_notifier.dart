@@ -53,17 +53,21 @@ class ResultsState {
   }
 }
 
-class ResultsNotifier extends StateNotifier<ResultsState> {
-  ResultsNotifier(AnalysisResult result)
-      : super(ResultsState(
-          items: List.of(result.items),
-          notes: result.notes,
-          utensilDetected: result.utensilDetected,
-          scaleConfidence: result.scaleConfidence,
-          photoPath: result.photoPath,
-          utensil: Utensil.parse(result.utensil),
-          mealType: _autoDetectMealType(result.capturedAt),
-        ));
+class ResultsNotifier extends Notifier<ResultsState> {
+  ResultsNotifier(this._result);
+
+  final AnalysisResult _result;
+
+  @override
+  ResultsState build() => ResultsState(
+        items: List.of(_result.items),
+        notes: _result.notes,
+        utensilDetected: _result.utensilDetected,
+        scaleConfidence: _result.scaleConfidence,
+        photoPath: _result.photoPath,
+        utensil: Utensil.parse(_result.utensil),
+        mealType: _autoDetectMealType(_result.capturedAt),
+      );
 
   void updateItem(int index, MealItem updated) {
     final items = List.of(state.items);
@@ -105,6 +109,6 @@ class ResultsNotifier extends StateNotifier<ResultsState> {
 }
 
 final resultsNotifierProvider =
-    StateNotifierProvider.autoDispose<ResultsNotifier, ResultsState>(
-  (ref) => throw UnimplementedError('Override with ResultsNotifier(result)'),
+    NotifierProvider.autoDispose<ResultsNotifier, ResultsState>(
+  () => throw UnimplementedError('Override with ResultsNotifier(result)'),
 );
